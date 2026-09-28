@@ -19,7 +19,9 @@ Commit it so it exists in **every worktree** and both Claude Code and OpenCode s
 git clone --depth 1 https://github.com/maorodriguez/spec-devflow .claude/skills/spec-devflow
 rm -rf .claude/skills/spec-devflow/.git     # avoid committing a nested repository
 bash .claude/skills/spec-devflow/scripts/setup.sh --hooks   # openspec init + agents (+ commit-msg hook)
-git add .claude/agents .claude/skills .claude/commands .opencode openspec && git commit -m "chore: add spec-devflow"
+git add .claude/agents/devflow-* .claude/skills/spec-devflow .claude/skills/openspec-* .claude/commands/opsx \
+        .opencode/agents/devflow-* .opencode/commands/opsx-* .opencode/skills/openspec-* openspec   # or the exact line setup.sh prints
+git commit -m "chore: add spec-devflow"
 ```
 
 `setup.sh` covers the next section's `openspec init` and the agent generation, so only the English pin and optional config below remain manual.

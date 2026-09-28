@@ -32,7 +32,7 @@ desc_of() {
 }
 
 # Subcommands the reviewer must not run; keep in sync with scripts/reviewer-bash-guard.sh (DENY_SUBS).
-REVIEWER_DENY_GIT="add commit push merge rebase reset checkout switch stash cherry-pick revert tag update-ref commit-tree restore clean pull am apply mv rm"
+REVIEWER_DENY_GIT="add commit push merge rebase reset checkout switch stash cherry-pick revert tag update-ref commit-tree restore clean pull am apply mv rm config bisect notes replace update-index read-tree submodule sparse-checkout filter-branch"
 
 body_of() {
   local esc; esc="$(printf '%s' "$SKILL_REL" | sed 's/[\\&#]/\\&/g')"

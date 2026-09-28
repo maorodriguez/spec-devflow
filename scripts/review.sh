@@ -22,7 +22,8 @@ base_ref() {
   if git rev-parse --verify --quiet "origin/$def" >/dev/null; then echo "origin/$def"; else echo "$def"; fi
 }
 
-count_sev() { grep -Ec "^- \[$2\]" "$1" || true; }
+# Counts only inside the Findings section, so text elsewhere in the report cannot inflate or hide a severity.
+count_sev() { sed -n '/^## Findings/,/^## Summary/p' "$1" | grep -Ec "^- \[$2\] " || true; }
 
 cmd_context() {
   local base="" since=""
@@ -67,7 +68,7 @@ cmd_record() {
   [ -z "$bad" ] || die "malformed finding line (must start with '- [SEVERITY] '): ${bad:0:80}"
   crit="$(count_sev "$f" CRITICAL)"; warn="$(count_sev "$f" WARNING)"; sugg="$(count_sev "$f" SUGGESTION)"
   local want="CRITICAL: $crit, WARNING: $warn, SUGGESTION: $sugg"
-  sed -n '/^## Summary/,$p' "$f" | grep -qF "$want" || die "summary counts do not match the findings (expected '$want')"
+  sed -n '/^## Summary/,$p' "$f" | sed 's/[[:space:]]*$//' | grep -qxF "$want" || die "summary counts do not match the findings (expected '$want')"
   mkdir -p "$RDIR"
   cp "$f" "$RDIR/$head.md"
   printf 'recorded=%s\ncritical=%s\nwarning=%s\nsuggestion=%s\n' "$head" "$crit" "$warn" "$sugg"

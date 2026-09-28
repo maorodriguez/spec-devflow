@@ -37,7 +37,13 @@ fi
 bash "$SCRIPT_DIR/agents.sh" generate --runtime "$runtime"
 [ "$hooks" != 1 ] || bash "$SCRIPT_DIR/install-hooks.sh"
 
-# Only paths that exist, and never all of .claude (it can hold worktrees/ and settings.local.json).
+# Only what spec-devflow and openspec init generate, and only if it exists: never whole .claude/.opencode
+# directories (they can hold user-owned agents, skills and commands, worktrees/ and settings.local.json).
+# Printed as glob patterns (the user's shell expands them), listing only patterns that match something.
 paths=""
-for p in .claude/agents .claude/skills .claude/commands .opencode openspec; do [ ! -e "$p" ] || paths="$paths $p"; done
+for pat in '.claude/agents/devflow-*' .claude/skills/spec-devflow '.claude/skills/openspec-*' .claude/commands/opsx \
+           '.opencode/agents/devflow-*' '.opencode/commands/opsx-*' '.opencode/skills/openspec-*' openspec; do
+  # shellcheck disable=SC2086
+  compgen -G "$pat" >/dev/null || [ -e "$pat" ] && paths="$paths $pat"
+done
 echo "done. Review and commit: git add$paths && git commit -m 'chore: add spec-devflow'"
