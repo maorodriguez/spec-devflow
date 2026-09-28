@@ -31,7 +31,24 @@ desc_of() {
   esac
 }
 
-body_of() { sed "s#<skill-dir>#$SKILL_REL#g" "$SKILL_ABS/assets/agents/$1.md"; }
+# Subcommands the reviewer must not run; keep in sync with scripts/reviewer-bash-guard.sh (DENY_SUBS).
+REVIEWER_DENY_GIT="add commit push merge rebase reset checkout switch stash cherry-pick revert tag update-ref commit-tree restore clean pull am apply mv rm"
+
+body_of() {
+  local esc; esc="$(printf '%s' "$SKILL_REL" | sed 's/[\\&#]/\\&/g')"
+  sed "s#<skill-dir>#$esc#g" "$SKILL_ABS/assets/agents/$1.md"
+}
+
+# Shell command that runs the reviewer guard. Inside the project it is anchored on
+# $CLAUDE_PROJECT_DIR (falling back to the cwd); it is quoted for the shell, then for YAML.
+guard_command() {
+  local c
+  case "$SKILL_REL" in
+    /*) c="\"$SKILL_REL/scripts/reviewer-bash-guard.sh\"";;
+    *) c="\"\${CLAUDE_PROJECT_DIR:-.}/$SKILL_REL/scripts/reviewer-bash-guard.sh\"";;
+  esac
+  printf "'%s'" "${c//\'/\'\'}"
+}
 
 render_claude() {
   local a="$1" model tools
@@ -43,7 +60,7 @@ render_claude() {
   if [ "$a" = reviewer ]; then
     # Claude Code has no per-command Bash permission (unlike OpenCode's permission.bash),
     # so read-only is enforced with a PreToolUse hook instead of a tools-list restriction.
-    printf 'hooks:\n  PreToolUse:\n    - matcher: Bash\n      hooks:\n        - type: command\n          command: "%s/scripts/reviewer-bash-guard.sh"\n' "$SKILL_REL"
+    printf 'hooks:\n  PreToolUse:\n    - matcher: Bash\n      hooks:\n        - type: command\n          command: %s\n' "$(guard_command)"
   fi
   printf -- '---\n%s\n\n' "$MARKER"
   body_of "$a"
@@ -55,7 +72,10 @@ render_opencode() {
   printf -- '---\ndescription: "%s"\nmode: subagent\n' "$(desc_of "$a")"
   [ -z "$model" ] || printf 'model: %s\n' "$model"
   case "$a" in
-    reviewer) printf 'temperature: 0.1\npermission:\n  edit: deny\n  bash:\n    "*": allow\n    "git add*": deny\n    "git commit*": deny\n    "git push*": deny\n    "git merge*": deny\n    "git rebase*": deny\n    "git reset*": deny\n    "git checkout*": deny\n    "git switch*": deny\n    "git stash*": deny\n    "git cherry-pick*": deny\n    "git revert*": deny\n    "git tag*": deny\n';;
+    reviewer)
+      printf 'temperature: 0.1\npermission:\n  edit: deny\n  bash:\n    "*": allow\n'
+      # "*git X*" also matches `cd d && git X` and `/usr/bin/git X`; "*git -* X*" matches `git -C dir X` / `git -c k=v X`.
+      for sub in $REVIEWER_DENY_GIT; do printf '    "*git %s*": deny\n    "*git -* %s*": deny\n' "$sub" "$sub"; done;;
     planner) printf 'temperature: 0.2\n';;
   esac
   printf -- '---\n%s\n\n' "$MARKER"
@@ -92,6 +112,7 @@ cmd_generate() {
     esac
   done
   case "$runtime" in claude|opencode|both) ;; *) die "invalid runtime: $runtime";; esac
+  case "$SKILL_REL" in /*) warn "the skill lives outside this project ($SKILL_REL); generated agent files embed that machine-specific path. Install it under .claude/skills/spec-devflow before committing them.";; esac
   for rt in claude opencode; do
     [ "$runtime" = both ] || [ "$runtime" = "$rt" ] || continue
     for a in $AGENTS; do

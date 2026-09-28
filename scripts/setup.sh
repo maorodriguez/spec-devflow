@@ -19,6 +19,7 @@ while [ $# -gt 0 ]; do
     *) die "unknown option: $1";;
   esac
 done
+case "$runtime" in claude|opencode|both) ;; *) die "invalid runtime: $runtime (claude|opencode|both)";; esac
 
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not inside a git repository"
 TOP="$(git rev-parse --show-toplevel)"
@@ -36,4 +37,7 @@ fi
 bash "$SCRIPT_DIR/agents.sh" generate --runtime "$runtime"
 [ "$hooks" != 1 ] || bash "$SCRIPT_DIR/install-hooks.sh"
 
-echo "done. Review and commit: git add .claude .opencode openspec && git commit -m 'chore: add spec-devflow'"
+# Only paths that exist, and never all of .claude (it can hold worktrees/ and settings.local.json).
+paths=""
+for p in .claude/agents .claude/skills .claude/commands .opencode openspec; do [ ! -e "$p" ] || paths="$paths $p"; done
+echo "done. Review and commit: git add$paths && git commit -m 'chore: add spec-devflow'"

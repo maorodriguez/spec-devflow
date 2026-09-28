@@ -54,12 +54,20 @@ cmd_record() {
   head="$(git rev-parse --verify --quiet "$head^{commit}")" || die "head $head is not a known commit"
   grep -q '^## Findings' "$f" || die "report has no '## Findings' section"
   grep -q '^## Summary' "$f" || die "report has no '## Summary' section"
-  if grep -Eq "$NON_ENGLISH_RE" "$f"; then die "report looks non-English; the review must be written in English"; fi
-  # When recording from a (detached) review worktree, it must still be clean: the reviewer is read-only.
-  if ! git symbolic-ref -q HEAD >/dev/null && [ -n "$(git status --porcelain)" ]; then
-    die "the review worktree has changes; the reviewer must not edit files (keep the report outside the worktree)"
+  # Text quoted in `backticks` (code, UI strings) may legitimately contain accents; only check the prose.
+  if sed 's/`[^`]*`//g' "$f" | grep -Eq "$NON_ENGLISH_RE"; then die "report looks non-English; the review must be written in English"; fi
+  # When recording from a (detached) review worktree, it must still be clean and the report must be about its HEAD.
+  if ! git symbolic-ref -q HEAD >/dev/null; then
+    [ -z "$(git status --porcelain)" ] || die "the review worktree has changes; the reviewer must not edit files (keep the report outside the worktree)"
+    [ "$head" = "$(git rev-parse HEAD)" ] || die "report head ${head:0:12} is not this review worktree's HEAD $(git rev-parse --short=12 HEAD)"
   fi
+  # Every severity-tagged line under Findings must use the exact '- [SEVERITY] ' form counted below.
+  local bad
+  bad="$(sed -n '/^## Findings/,/^## Summary/p' "$f" | grep -E '\[(CRITICAL|WARNING|SUGGESTION)\]' | grep -Ev '^- \[(CRITICAL|WARNING|SUGGESTION)\] ' | head -n1 || true)"
+  [ -z "$bad" ] || die "malformed finding line (must start with '- [SEVERITY] '): ${bad:0:80}"
   crit="$(count_sev "$f" CRITICAL)"; warn="$(count_sev "$f" WARNING)"; sugg="$(count_sev "$f" SUGGESTION)"
+  local want="CRITICAL: $crit, WARNING: $warn, SUGGESTION: $sugg"
+  sed -n '/^## Summary/,$p' "$f" | grep -qF "$want" || die "summary counts do not match the findings (expected '$want')"
   mkdir -p "$RDIR"
   cp "$f" "$RDIR/$head.md"
   printf 'recorded=%s\ncritical=%s\nwarning=%s\nsuggestion=%s\n' "$head" "$crit" "$warn" "$sugg"

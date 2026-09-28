@@ -16,7 +16,7 @@ From the root of the project you want to use it in (a git repository):
 git clone --depth 1 https://github.com/maorodriguez/spec-devflow .claude/skills/spec-devflow \
   && rm -rf .claude/skills/spec-devflow/.git \
   && bash .claude/skills/spec-devflow/scripts/setup.sh --hooks
-git add .claude .opencode openspec && git commit -m "chore: add spec-devflow"
+git add .claude/agents .claude/skills .claude/commands .opencode openspec && git commit -m "chore: add spec-devflow"
 ```
 
 `.claude/skills` is read by both Claude Code and OpenCode. Removing the clone's `.git` keeps it from being committed as a nested repository. `setup.sh` runs `openspec init` (if `openspec/` is missing) and generates the planner / implementer / reviewer agents; `--hooks` also installs the commit-msg hook that strips AI attribution (optional). Restart your Claude Code session afterwards so it picks up the new agents.
