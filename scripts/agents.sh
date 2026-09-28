@@ -31,8 +31,20 @@ desc_of() {
   esac
 }
 
-# Subcommands the reviewer must not run; keep in sync with scripts/reviewer-bash-guard.sh (DENY_SUBS).
-REVIEWER_DENY_GIT="add commit push merge rebase reset checkout switch stash cherry-pick revert tag update-ref commit-tree restore clean pull am apply mv rm config bisect notes replace update-index read-tree submodule sparse-checkout filter-branch"
+# OpenCode reviewer allowlist (permission.bash: last matching rule wins, "*" is denied first).
+# Verified with OpenCode 1.18: `ls && git commit`, `ls; git commit`, `ls | git commit`, `ls $(git commit)`
+# and backtick substitution are each split and denied even though `ls *` is allowed; a redirection
+# (`ls > f`) is NOT split, hence the trailing "*>*" deny. Keep in sync with scripts/reviewer-bash-guard.sh.
+REVIEWER_ALLOW_CMDS="ls cat head tail wc grep diff jq find pwd echo basename dirname stat file cd test pytest shellcheck"
+REVIEWER_ALLOW_GIT="status log diff show rev-parse rev-list ls-files ls-tree cat-file blame shortlog describe merge-base name-rev grep diff-tree diff-index for-each-ref show-ref count-objects check-ignore whatchanged range-diff show-branch var version help cherry"
+REVIEWER_ALLOW_OTHER="openspec validate|openspec list|openspec show|openspec status|npm test|npm run lint|npm run test|npm run typecheck|go test|go vet|cargo test|cargo clippy|cargo check|make test|make check|make lint|gh pr view|gh pr diff|gh pr checks|gh pr list|gh issue view|gh issue list|git branch --list|git branch -a|git branch -r|git branch -v|git branch --show-current|git worktree list|git stash list|git stash show|*scripts/review.sh context|*scripts/review.sh status|bash *scripts/review.sh context|bash *scripts/review.sh status|sh *scripts/review.sh context|sh *scripts/review.sh status|bash -n"
+REVIEWER_DENY_ARGS="*>*|*--output*|*-exec*|*-execdir*|*-delete*|*-fprint*|*-fls*|* -ok *|*-okdir*|*--open-files-in-pager*|*--ext-diff*|*--pre*"
+
+# One "cmd" rule and one "cmd *" rule (a bare glob "cmd*" would also match "cmdevil").
+allow_pair() { printf '    "%s": allow\n    "%s *": allow\n' "$1" "$1"; }
+deny_one() { printf '    "%s": deny\n' "$1"; }
+# Calls "$1" for each item of the |-separated list "$2" (globs such as * must not expand here).
+each_item() { local fn="$1" item; local IFS='|'; set -f; for item in $2; do "$fn" "$item"; done; }
 
 body_of() {
   local esc; esc="$(printf '%s' "$SKILL_REL" | sed 's/[\\&#]/\\&/g')"
@@ -73,9 +85,14 @@ render_opencode() {
   [ -z "$model" ] || printf 'model: %s\n' "$model"
   case "$a" in
     reviewer)
-      printf 'temperature: 0.1\npermission:\n  edit: deny\n  bash:\n    "*": allow\n'
-      # "*git X*" also matches `cd d && git X` and `/usr/bin/git X`; "*git -* X*" matches `git -C dir X` / `git -c k=v X`.
-      for sub in $REVIEWER_DENY_GIT; do printf '    "*git %s*": deny\n    "*git -* %s*": deny\n' "$sub" "$sub"; done;;
+      printf 'temperature: 0.1\npermission:\n  edit: deny\n  bash:\n    "*": deny\n'
+      local c sub
+      for c in $REVIEWER_ALLOW_CMDS; do allow_pair "$c"; done
+      for sub in $REVIEWER_ALLOW_GIT; do allow_pair "git $sub"; done
+      each_item allow_pair "$REVIEWER_ALLOW_OTHER"
+      # Test command from the trusted (main worktree) config, when it is a plain string.
+      case "${DEVFLOW_TEST_CMD:-}" in ''|*'"'*|*'\'*) ;; *) allow_pair "$DEVFLOW_TEST_CMD";; esac
+      each_item deny_one "$REVIEWER_DENY_ARGS";;
     planner) printf 'temperature: 0.2\n';;
   esac
   printf -- '---\n%s\n\n' "$MARKER"
