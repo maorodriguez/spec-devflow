@@ -1,0 +1,6 @@
+# Generated per project by scripts/agents.sh / openspec init; not part of the skill itself
+.claude/
+.opencode/
+openspec/
+.spec-devflow.conf
+.DS_Store
