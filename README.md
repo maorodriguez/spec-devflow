@@ -21,7 +21,7 @@ That copies the skill into `.claude/skills/spec-devflow` (read by both Claude Co
 ```bash
 bash .claude/skills/spec-devflow/scripts/setup.sh --hooks
 git add .claude/agents/devflow-* .claude/skills/spec-devflow .claude/skills/openspec-* .claude/commands/opsx \
-        .opencode/agents/devflow-* .opencode/commands/opsx-* .opencode/skills/openspec-* openspec   # or the exact line setup.sh prints
+        .opencode/agents/devflow-* .opencode/commands/opsx-* .opencode/skills/openspec-* openspec skills-lock.json   # or the exact line setup.sh prints
 git commit -m "chore: add spec-devflow"
 ```
 

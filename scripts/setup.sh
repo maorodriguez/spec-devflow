@@ -42,7 +42,7 @@ bash "$SCRIPT_DIR/agents.sh" generate --runtime "$runtime"
 # Printed as glob patterns (the user's shell expands them), listing only patterns that match something.
 paths=""
 for pat in '.claude/agents/devflow-*' .claude/skills/spec-devflow '.claude/skills/openspec-*' .claude/commands/opsx \
-           '.opencode/agents/devflow-*' '.opencode/commands/opsx-*' '.opencode/skills/openspec-*' openspec; do
+           '.opencode/agents/devflow-*' '.opencode/commands/opsx-*' '.opencode/skills/openspec-*' openspec skills-lock.json; do
   # shellcheck disable=SC2086
   compgen -G "$pat" >/dev/null || [ -e "$pat" ] && paths="$paths $pat"
 done

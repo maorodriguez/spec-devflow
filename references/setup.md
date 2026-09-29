@@ -19,7 +19,7 @@ Commit it so it exists in **every worktree** and both Claude Code and OpenCode s
 npx skills add maorodriguez/spec-devflow -a claude-code --copy   # installs into .claude/skills/spec-devflow
 bash .claude/skills/spec-devflow/scripts/setup.sh --hooks   # openspec init + agents (+ commit-msg hook)
 git add .claude/agents/devflow-* .claude/skills/spec-devflow .claude/skills/openspec-* .claude/commands/opsx \
-        .opencode/agents/devflow-* .opencode/commands/opsx-* .opencode/skills/openspec-* openspec   # or the exact line setup.sh prints
+        .opencode/agents/devflow-* .opencode/commands/opsx-* .opencode/skills/openspec-* openspec skills-lock.json   # or the exact line setup.sh prints
 git commit -m "chore: add spec-devflow"
 ```
 
