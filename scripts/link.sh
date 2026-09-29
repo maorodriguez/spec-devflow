@@ -36,6 +36,15 @@ if [ -z "$change" ] && [ "$has_gh" = 1 ]; then
 fi
 echo "change=${change:-unknown}"
 
+# A PR without an OpenSpec change (a fix or chore) still names its head branch and usually its issue.
+pr_head=""
+if [ -n "$pr" ] && [ "$has_gh" = 1 ]; then
+  pr_head="$(gh pr view "$pr" --json headRefName --jq .headRefName 2>/dev/null || true)"
+  if [ -z "$issue" ]; then
+    issue="$(gh pr view "$pr" --json body --jq .body 2>/dev/null | grep -Eio '(closes|fixes|resolves|refs):? #[0-9]+' | head -n1 | grep -Eo '[0-9]+' || true)"
+  fi
+fi
+
 if [ -n "$change" ]; then
   if [ -d "$MAIN/openspec/changes/$change" ]; then echo "change_state=active_on_main_checkout"
   elif find "$MAIN/openspec/changes/archive" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | grep -Eq "/[0-9]{4}-[0-9]{2}-[0-9]{2}-$change\$"; then echo "change_state=archived"
@@ -51,11 +60,12 @@ echo "issue=${issue:-none}"
 # Branches whose name ends with the change id (or carry the issue number).
 pat=""
 [ -z "$change" ] || pat="$change"
-if [ -n "$pat" ] || [ -n "$issue" ]; then
+if [ -n "$pat" ] || [ -n "$issue" ] || [ -n "$pr_head" ]; then
   has_remote && git -C "$MAIN" fetch --quiet origin 2>/dev/null || true
   branches="$(git -C "$MAIN" for-each-ref --format='%(refname:short)' refs/heads refs/remotes/origin \
     | grep -v '^origin/HEAD$' | sed 's#^origin/##' | sort -u \
     | grep -E "(^|/)([0-9]+-)?${pat:-__none__}$|/${issue%%,*}-" 2>/dev/null | paste -sd, -)"
+  if [ -n "$pr_head" ]; then case ",${branches:-}," in *",$pr_head,"*) ;; *) branches="${branches:+$branches,}$pr_head";; esac; fi
   echo "branches=${branches:-none}"
 fi
 

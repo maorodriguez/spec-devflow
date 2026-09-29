@@ -61,7 +61,10 @@ for f in "$top"/.claude/commands/opsx/*.md "$top"/.opencode/commands/opsx-*.md; 
   case " $found " in *" $n "*) ;; *) found="$found $n";; esac
 done
 kv opsx_commands "${found# }"
-kv opsx_verify "$(case " $found " in *" verify "*) echo yes;; *) echo no;; esac)"
+# (no `case` inside $( ): bash 3.2 on macOS mis-parses the `)` of a case pattern there)
+opsx_verify=no
+case " $found " in *" verify "*) opsx_verify=yes;; esac
+kv opsx_verify "$opsx_verify"
 
 # openspec-* skills present in both locations (possible duplicates in OpenCode)
 dups=""

@@ -4,7 +4,7 @@ description: 'Spec-driven development flow with OpenSpec + GitHub (issues, branc
 license: MIT
 compatibility: claude-code, opencode; requires git >= 2.32, authenticated gh CLI and @fission-ai/openspec >= 1.x; Orca CLI optional
 metadata:
-  version: "0.4.0"
+  version: "0.5.0"
   workflow: openspec-github-worktrees
 ---
 

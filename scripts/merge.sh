@@ -35,14 +35,16 @@ if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then die
 fail=0
 
 info="$(gh pr view "$pr" --json state,isDraft,author,headRefName,headRefOid,baseRefName,reviewDecision,mergeStateStatus \
-  --jq '[.state, (.isDraft|tostring), .author.login, .headRefName, .headRefOid, .baseRefName, (.reviewDecision // "NONE"), (.mergeStateStatus // "UNKNOWN")] | join(" ")')" \
+  --jq '[.state, (.isDraft|tostring), .author.login, .headRefName, .headRefOid, .baseRefName, (.reviewDecision | if . == null or . == "" then "NONE" else . end), (.mergeStateStatus | if . == null or . == "" then "UNKNOWN" else . end)] | join(" ")')" \
   || die "cannot read PR #$pr"
 read -r state draft author head head_oid base decision mstate <<EOF
 $info
 EOF
-# title/body can contain spaces and newlines, so they can't go through the space-joined read above;
-# fetch both together (NUL-separated) instead of two more separate `gh pr view` round trips.
-{ IFS= read -r -d '' title; IFS= read -r -d '' body; } < <(gh pr view "$pr" --json title,body --jq -j '.title + "\u0000" + .body + "\u0000"')
+# title/body can contain spaces and newlines, so they can't go through the space-joined read above.
+# (gh has no `--jq -j`; `--jq` prints a string result raw, without quotes.) reviewDecision is "" (not null)
+# when the repo does not require reviews, so `// "NONE"` would not fire and the fields would shift.
+title="$(gh pr view "$pr" --json title --jq .title)" || die "cannot read the title of PR #$pr"
+body="$(gh pr view "$pr" --json body --jq .body)" || die "cannot read the body of PR #$pr"
 me="$(gh api user --jq .login 2>/dev/null || echo unknown)"
 
 echo "== PR #$pr ($head -> $base) by $author; you are $me"
