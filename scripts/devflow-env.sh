@@ -72,6 +72,13 @@ for d in "$top"/.claude/skills/openspec-*; do
 done
 kv duplicate_openspec_skills "${dups# }"
 
+# First-use bootstrap: setup.sh has not run yet if openspec/ or the generated agents are missing
+agents_found=no
+for f in "$top"/.claude/agents/devflow-*.md "$top"/.opencode/agents/devflow-*.md; do
+  [ -e "$f" ] && { agents_found=yes; break; }
+done
+if [ -d "$top/openspec" ] && [ "$agents_found" = yes ]; then kv setup_needed no; else kv setup_needed yes; fi
+
 if [ -f "$(main_worktree)/.worktreeinclude" ]; then kv worktreeinclude yes; else kv worktreeinclude no; fi
 kv test_cmd "${DEVFLOW_TEST_CMD:-unset}"
 
