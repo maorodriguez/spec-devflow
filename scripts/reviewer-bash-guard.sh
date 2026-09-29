@@ -13,7 +13,8 @@
 # the shell's directory (`cd`) are deliberately NOT on the list. For git, gh, openspec, the
 # test runners and review.sh every argument must be a literal word (no $expansions, globs or
 # braces, which could smuggle in an option), and git only runs read-only subcommands.
-# Blocked outright: command and process substitution ($( ) ` <( )), redirections other than
+# Blocked outright: command and process substitution ($( ) ` <( )), ${..}, $[..] and (( )) (they
+# assign variables or evaluate arithmetic; only plain $name expansions are accepted), redirections other than
 # 2>&1 and >/dev/null, environment assignments before a command (GIT_CONFIG_*, ...), paths as
 # command names, unterminated quotes and unparseable payloads. Unknown commands and unknown git
 # subcommands are denied, so git aliases from the user's config cannot be used either.
@@ -158,7 +159,7 @@ check_segment() {
   case "$name" in
     git) check_git "$from"; return 0;;
     openspec) literal_args "$from"; case "$a1" in validate|list|show|status|--version|-v) return 0;; *) block "only 'openspec validate|list|show|status' is allowed";; esac;;
-    gh) literal_args "$from"; has_arg "$from" --web -w && block "gh --web launches a browser"; case "$a1 $a2" in "pr view"|"pr diff"|"pr checks"|"pr list"|"issue view"|"issue list") return 0;; *) block "only read-only 'gh pr|issue view|diff|checks|list' is allowed";; esac;;
+    gh) literal_args "$from"; has_arg "$from" --web '--web=*' -w '-[!-]*w*' && block "gh --web launches a browser"; case "$a1 $a2" in "pr view"|"pr diff"|"pr checks"|"pr list"|"issue view"|"issue list") return 0;; *) block "only read-only 'gh pr|issue view|diff|checks|list' is allowed";; esac;;
     npm|pnpm|yarn)
       case "$nargs:$a1:$a2" in "$((i+2)):test:"|"$((i+2)):t:"|"$((i+3)):run:test"|"$((i+3)):run:lint"|"$((i+3)):run:typecheck"|"$((i+3)):run:check") literal_args "$from"; return 0;; esac
       block "only exactly '$name test' or '$name run test|lint|typecheck|check' is allowed";;
@@ -185,6 +186,16 @@ end_segment() {
   W=(); D=(); G=()
 }
 
+# Only plain variable expansions ($name, $1, $?, $@ ...) are accepted. ${..} can assign (${x:=..}),
+# $[..] and $((..)) evaluate arithmetic (whose array subscripts run command substitution), and
+# $(..) substitutes commands; none of those can be checked statically.
+check_dollar() {
+  case "${cmd:$pos:1}" in
+    [A-Za-z_0-9@*#?!$-]) ;;
+    *) block "only simple \$name expansions are allowed (no \${..}, \$[..], \$(..), \$((..)))";;
+  esac
+}
+
 n=${#cmd}; pos=0
 while [ "$pos" -lt "$n" ]; do
   c="${cmd:$pos:1}"; pos=$((pos+1))
@@ -200,7 +211,7 @@ while [ "$pos" -lt "$n" ]; do
         '"') q="";;
         '\') esc=1;;
         '`') block "command substitution is not allowed";;
-        '$') [ "${cmd:$pos:1}" != "(" ] || block "command substitution is not allowed"; curd=1; cur="$cur$c";;
+        '$') check_dollar; curd=1; cur="$cur$c";;
         *) cur="$cur$c";;
       esac
       continue;;
@@ -210,9 +221,10 @@ while [ "$pos" -lt "$n" ]; do
     "'") q="'"; inword=1;;
     '"') q='"'; inword=1;;
     '`') block "command substitution is not allowed";;
-    '$') [ "${cmd:$pos:1}" != "(" ] || block "command substitution is not allowed"; curd=1; inword=1; cur="$cur$c";;
+    '$') check_dollar; curd=1; inword=1; cur="$cur$c";;
     '*'|'?'|'['|'{') curg=1; inword=1; cur="$cur$c";;
-    ';'|'&'|'|'|'('|')'|"$nl") end_segment;;
+    '(') [ "${cmd:$pos:1}" != "(" ] || block "arithmetic (( )) is not allowed"; end_segment;;
+    ';'|'&'|'|'|')'|"$nl") end_segment;;
     '<'|'>') block "redirections and process substitution are not allowed (only 2>&1 and >/dev/null)";;
     ' '|$'\t') flush_word;;
     *) cur="$cur$c"; inword=1;;

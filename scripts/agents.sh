@@ -45,7 +45,7 @@ REVIEWER_ALLOW_ARGS="openspec validate|openspec list|openspec show|openspec stat
 REVIEWER_ALLOW_EXACT="npm test|npm run test|npm run lint|npm run typecheck|npm run check|make test|make check|make lint|go test ./...|go vet ./...|cargo test|cargo clippy|cargo check|pytest|git branch|git branch -a|git branch -r|git branch -v|git branch -vv|git branch --show-current"
 # Denied whatever the command: redirections, and git options that write or run programs (incl. git's
 # unique-prefix abbreviations: --open=..., --out=..., --ext=...), git with expansions/braces/empty-quote splices.
-REVIEWER_DENY_ARGS='*>*|gh *--web*|git *-O*|git grep *-*O*|git *--op*|git *--ou*|git *--ext*|git *$*|git *{*|git *""*|git *'"''"'*'
+REVIEWER_DENY_ARGS='*>*|gh *--web*|gh * -w*|gh * -?w*|gh * -??w*|git *-O*|git grep *-?O*|git grep *-??O*|git grep *-???O*|git *--op*|git *--ou*|git *--ext*|git *$*|git *{*|git *""*|git *'"''"'*'
 
 # One "cmd" rule and one "cmd *" rule (a bare glob "cmd*" would also match "cmdevil").
 allow_pair() { printf '    %s: allow\n    %s: allow\n' "$(yq_str "$1")" "$(yq_str "$1 *")"; }
