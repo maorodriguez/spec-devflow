@@ -13,6 +13,7 @@
 # the shell's directory (`cd`) are deliberately NOT on the list. For git, gh, openspec, the
 # test runners and review.sh every argument must be a literal word (no $expansions, globs or
 # braces, which could smuggle in an option), and git only runs read-only subcommands.
+# Shell comments are skipped like bash does; `for` loops are not allowed (they assign HOME/PATH/...).
 # Blocked outright: command and process substitution ($( ) ` <( )), ${..}, $[..] and (( )) (they
 # assign variables or evaluate arithmetic; only plain $name expansions are accepted), redirections other than
 # 2>&1 and >/dev/null, environment assignments before a command (GIT_CONFIG_*, ...), paths as
@@ -60,8 +61,14 @@ raw_cmd="${cmd#"${cmd%%[![:space:]]*}"}"; raw_cmd="${raw_cmd%"${raw_cmd##*[![:sp
 
 # Redirections that cannot write anywhere are dropped before tokenizing; each must be a whole token
 # (`>&1foo` and `>/dev/nullx` are file redirections and stay in the text, where `>` is then blocked).
-B='([[:space:];&|)]|$)'
-cmd="$(printf '%s' "$cmd" | sed -E "s/[0-9]*>&([0-9]+|-)$B/\\2/g; s/&?[0-9]*>>?[[:space:]]*\\/dev\\/null$B/\\1/g")"
+# The redirection must start at a word boundary (`diff3>&1` is the command `diff3` plus a redirection,
+# not `diff` plus `3>&1`) and end at one; anything else keeps its `>`, which is blocked below.
+L='(^|[[:space:];&|()])'; B='([[:space:];&|)]|$)'
+for _ in 1 2 3 4 5 6; do
+  new="$(printf '%s' "$cmd" | sed -E "s/${L}[0-9]*>&([0-9]+|-)$B/\\1\\3/g; s/${L}&?[0-9]*>>?[[:space:]]*\\/dev\\/null$B/\\1\\2/g")"
+  [ "$new" != "$cmd" ] || break
+  cmd="$new"
+done
 
 # --- trusted test command (main worktree only) -----------------------------------------------
 TEST_CMD=""
@@ -82,7 +89,7 @@ literal_args() { local k="$1"; while [ "$k" -lt "$nargs" ]; do
   k=$((k+1)); done; }
 
 # Is any argument (from index $1 on) one of the given globs? usage: has_arg <from> <glob>...
-has_arg() { local k="$1" p a; shift; while [ "$k" -lt "$nargs" ]; do a="${W[$k]}"; for p in "$@"; do case "$a" in $p) return 0;; esac; done; k=$((k+1)); done; return 1; }
+has_arg() { local k="$1" p a; shift; while [ "$k" -lt "$nargs" ]; do a="${W[$k]}"; [ "$a" != -- ] || return 1; case "$a" in -[eGSL]*) k=$((k+1)); continue;; esac; for p in "$@"; do case "$a" in $p) return 0;; esac; done; k=$((k+1)); done; return 1; }
 
 # Each word from index $1 on must be a path/package (./..., a/b) or one of the given literal flags.
 only_paths_or() { local k="$1" a f ok; shift; while [ "$k" -lt "$nargs" ]; do a="${W[$k]}"; ok=0
@@ -92,6 +99,7 @@ only_paths_or() { local k="$1" a f ok; shift; while [ "$k" -lt "$nargs" ]; do a=
 # The skill's own review.sh: this guard's sibling, or the conventional install path (relative or absolute).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
 is_skill_review() {
+  case "$1" in *..*) return 1;; esac
   case "$1" in
     "$SCRIPT_DIR/review.sh"|.claude/skills/spec-devflow/scripts/review.sh|./.claude/skills/spec-devflow/scripts/review.sh|/*/.claude/skills/spec-devflow/scripts/review.sh) return 0;;
   esac
@@ -125,7 +133,7 @@ check_git() {
   # Options that write a file or launch a program, including git's unique-prefix abbreviations
   # (`--open` is `--open-files-in-pager`, `--out` is `--output`, `--ext` is `--ext-diff`) and short-flag
   # bundles that end in the optional-argument -O (`git grep -iOprog` runs prog).
-  has_arg "$j" -o '-O*' '-[!-]*O*' '--op*' '--ou*' '--ext*' && block "git option that writes files or runs programs"
+  has_arg "$j" '-O*' '-[!-]*O*' '--op*' '--ou*' '--ext*' && block "git option that writes files or runs programs"
   return 0
 }
 
@@ -137,19 +145,19 @@ check_segment() {
   done
   [ "$i" -lt "$nargs" ] || return 0
   w="${W[$i]}"
-  case "$w" in done|fi|esac|'}'|for) return 0;; esac
+  case "$w" in done|fi|esac|'}') return 0;; esac
   [ "${D[$i]}" = 0 ] || block "the command name must not come from an expansion"
   case "$w" in *=*) block "environment assignments before a command are not allowed";; esac
 
   local from=$((i+1)) a1="${W[$((i+1))]:-}" a2="${W[$((i+2))]:-}"
   # review.sh: directly or as `bash <path>`; only context|status, and only the skill's own copy
   if [ "$w" = bash ]; then
-    is_skill_review "$a1" || block "'bash' may only run the skill's review.sh context|status"
+    is_skill_review "$a1" && [ "${D[$((i+1))]}" = 0 ] && [ "${G[$((i+1))]}" = 0 ] || block "'bash' may only run the skill's review.sh context|status"
     w="$a1"; from=$((from+1)); a1="$a2"
   fi
   case "$w" in
     *review.sh)
-      is_skill_review "$w" || block "review.sh must be run through the skill path (.claude/skills/spec-devflow/scripts/review.sh)"
+      is_skill_review "$w" && [ "${G[$i]}" = 0 ] || block "review.sh must be run through the skill path (.claude/skills/spec-devflow/scripts/review.sh)"
       case "$a1" in context|status) literal_args "$from"; return 0;; *) block "only 'review.sh context|status' is allowed";; esac;;
     */*) block "commands must be bare names on the allowlist (no paths): $w";;
   esac
@@ -191,8 +199,11 @@ end_segment() {
 # $(..) substitutes commands; none of those can be checked statically.
 check_dollar() {
   case "${cmd:$pos:1}" in
-    [A-Za-z_0-9@*#?!$-]) ;;
-    *) block "only simple \$name expansions are allowed (no \${..}, \$[..], \$(..), \$((..)))";;
+    [A-Za-z_0-9@*#?!$-]) ;;                                    # $name, $1, $?, $@ ...
+    '{'|'('|'[') block "only simple \$name expansions are allowed (no \${..}, \$(..), \$[..], \$((..)))";;
+    "'") block "\$'..' quoting is not allowed";;
+    '"') [ "$1" = dq ] || block "\$\"..\" quoting is not allowed";;      # inside "..." it is a literal $ before the closing quote
+    *) ;;                                                       # a literal $ (regex end anchor, `$ `, `$|`, end of line)
   esac
 }
 
@@ -211,7 +222,7 @@ while [ "$pos" -lt "$n" ]; do
         '"') q="";;
         '\') esc=1;;
         '`') block "command substitution is not allowed";;
-        '$') check_dollar; curd=1; cur="$cur$c";;
+        '$') check_dollar dq; curd=1; cur="$cur$c";;
         *) cur="$cur$c";;
       esac
       continue;;
@@ -221,6 +232,9 @@ while [ "$pos" -lt "$n" ]; do
     "'") q="'"; inword=1;;
     '"') q='"'; inword=1;;
     '`') block "command substitution is not allowed";;
+    '#') if [ "$inword" = 0 ]; then                              # comment: bash ignores the rest of the line
+           while [ "$pos" -lt "$n" ] && [ "${cmd:$pos:1}" != "$nl" ]; do pos=$((pos+1)); done
+         else cur="$cur$c"; fi;;
     '$') check_dollar; curd=1; inword=1; cur="$cur$c";;
     '*'|'?'|'['|'{') curg=1; inword=1; cur="$cur$c";;
     '(') [ "${cmd:$pos:1}" != "(" ] || block "arithmetic (( )) is not allowed"; end_segment;;
