@@ -10,7 +10,9 @@
 # allowlist (no paths, no expansions). The allowed commands have no write or exec options
 # (ls cat head tail wc cut tr nl tac column diff cmp jq grep stat echo ...); commands that do (find,
 # sed, sort, rg, date, file, ...) or evaluate their operands (`[[`, `test -v`, `printf -v`) or change
-# the shell's directory (`cd`) are deliberately NOT on the list. For git, gh, openspec, the
+# the shell's directory are deliberately NOT on the list; `cd` and `git -C` are accepted only for the
+# exact absolute path of a registered worktree (`git worktree list`), so the reviewer can enter the review
+# worktree but never a directory chosen by the change. For git, gh, openspec, the
 # test runners and review.sh every argument must be a literal word (no $expansions, globs or
 # braces, which could smuggle in an option), and git only runs read-only subcommands.
 # Shell comments are skipped like bash does; `for` loops are not allowed (they assign HOME/PATH/...).
@@ -96,6 +98,22 @@ only_paths_or() { local k="$1" a f ok; shift; while [ "$k" -lt "$nargs" ]; do a=
   case "$a" in -*) for f in "$@"; do [ "$a" != "$f" ] || ok=1; done;; *[!A-Za-z0-9_./:@-]*) ;; *) ok=1;; esac
   [ "$ok" = 1 ] || block "argument '$a' is not allowed here"; k=$((k+1)); done; }
 
+# `cd` and `git -C` may only target a worktree registered with this repository (`git worktree list`),
+# by exact absolute path: the reviewer has to enter the review worktree the orchestrator gives it, but
+# a directory chosen by the change (a committed bare-repo layout whose config runs core.pager or
+# core.fsmonitor) is never a registered worktree. $1 = path, $2 = index of the word in W/D/G.
+WT_LIST=""; WT_LOADED=0
+is_registered_worktree() {
+  local p="$1" idx="$2" line
+  [ "${D[$idx]}" = 0 ] && [ "${G[$idx]}" = 0 ] || return 1
+  case "$p" in /*) ;; *) return 1;; esac
+  case "$p" in *..*) return 1;; esac
+  p="${p%/}"
+  if [ "$WT_LOADED" = 0 ]; then WT_LIST="$(git worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p')"; WT_LOADED=1; fi
+  while IFS= read -r line; do [ "$line" != "$p" ] || return 0; done <<< "$WT_LIST"
+  return 1
+}
+
 # The skill's own review.sh: this guard's sibling, or the conventional install path (relative or absolute).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
 is_skill_review() {
@@ -112,6 +130,7 @@ check_git() {
   while [ "$j" -lt "$nargs" ]; do
     a="${W[$j]}"
     case "$a" in
+      -C) [ $((j+1)) -lt "$nargs" ] && is_registered_worktree "${W[$((j+1))]}" "$((j+1))" || block "git -C may only target a registered worktree (absolute path from 'git worktree list')"; j=$((j+2));;
       --no-pager|--no-optional-locks|-P|--no-replace-objects|--literal-pathspecs|--glob-pathspecs|--noglob-pathspecs|--icase-pathspecs) j=$((j+1));;
       -*) block "git option '$a' is not allowed";;
       *) break;;
@@ -165,6 +184,7 @@ check_segment() {
   case "$name" in *[!A-Za-z0-9_.+:\[-]*) block "unexpected characters in command name";; esac
 
   case "$name" in
+    cd) [ "$nargs" = "$((i+2))" ] && is_registered_worktree "$a1" "$((i+1))" || block "cd may only target a registered worktree (absolute path from 'git worktree list')"; return 0;;
     git) check_git "$from"; return 0;;
     openspec) literal_args "$from"; case "$a1" in validate|list|show|status|--version|-v) return 0;; *) block "only 'openspec validate|list|show|status' is allowed";; esac;;
     gh) literal_args "$from"; has_arg "$from" --web '--web=*' -w '-[!-]*w*' && block "gh --web launches a browser"; case "$a1 $a2" in "pr view"|"pr diff"|"pr checks"|"pr list"|"issue view"|"issue list") return 0;; *) block "only read-only 'gh pr|issue view|diff|checks|list' is allowed";; esac;;

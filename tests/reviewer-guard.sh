@@ -47,7 +47,7 @@ for mode in jq nojq; do
 done
 
 # DEVFLOW_TEST_CMD: read from the MAIN worktree's conf only, matched against the whole command line.
-tmp="$(mktemp -d)"; trap 'rm -rf "$NOJQ" "$tmp"' EXIT
+tmp="$(mktemp -d)"; tmp="$(cd "$tmp" && pwd -P)"; trap 'rm -rf "$NOJQ" "$tmp"' EXIT
 git -C "$tmp" init -q && git -C "$tmp" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 echo 'DEVFLOW_TEST_CMD="npm ci && npm test 2>/dev/null"' > "$tmp/.spec-devflow.conf"
 git -C "$tmp" worktree add -q --detach "$tmp-wt"
@@ -60,6 +60,27 @@ check_test_cmd 0 'npm ci && npm test 2>/dev/null'
 check_test_cmd 2 'npm ci && npm test'
 check_test_cmd 2 'npm ci && npm test 2>/dev/null && git commit -m x'
 check_test_cmd 2 'git commit -m x'
+# cd and git -C: only the exact absolute path of a registered worktree (the main one or a linked one).
+mkdir -p "$tmp-wt/sub" "$tmp-wt/bare"; : > "$tmp-wt/bare/HEAD"; : > "$tmp-wt/bare/config"   # a change-controlled "repository"
+check_test_cmd 0 "cd $tmp-wt"
+check_test_cmd 0 "cd $tmp-wt/"
+check_test_cmd 0 "cd $tmp"
+check_test_cmd 0 "cd $tmp-wt && git log --oneline"
+check_test_cmd 0 "git -C $tmp-wt log --oneline"
+check_test_cmd 0 "git -C $tmp status"
+check_test_cmd 2 "cd /tmp"
+check_test_cmd 2 "cd $tmp-wt/sub"
+check_test_cmd 2 "cd $tmp-wt/bare"
+check_test_cmd 2 "cd $tmp-wt/.."
+check_test_cmd 2 "cd $tmp-wt extra"
+check_test_cmd 2 "cd"
+check_test_cmd 2 'cd $HOME'
+check_test_cmd 2 "cd $tmp-w*"
+check_test_cmd 2 "git -C /tmp log"
+check_test_cmd 2 "git -C $tmp-wt/bare status"
+check_test_cmd 2 "git -C $tmp-wt/sub log"
+check_test_cmd 2 "git -C log"
+check_test_cmd 2 "cd $tmp-wt && git commit -m x"
 git -C "$tmp" worktree remove --force "$tmp-wt" 2>/dev/null; rm -rf "$tmp-wt"
 echo "[test-cmd] done"
 
