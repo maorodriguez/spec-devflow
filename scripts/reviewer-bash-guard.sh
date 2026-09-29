@@ -8,8 +8,9 @@
 # The command is tokenized quote-aware (single quotes, double quotes, backslashes) and split into
 # segments at ; & | ( ) and newlines. Each segment's command word must be a bare name on the
 # allowlist (no paths, no expansions). The allowed commands have no write or exec options
-# (ls cat head tail wc cut tr nl tac column diff cmp jq grep stat ...); commands that do (find,
-# sed, sort, rg, date, file, ...) are deliberately NOT on the list. For git, gh, openspec, the
+# (ls cat head tail wc cut tr nl tac column diff cmp jq grep stat echo ...); commands that do (find,
+# sed, sort, rg, date, file, ...) or evaluate their operands (`[[`, `test -v`, `printf -v`) or change
+# the shell's directory (`cd`) are deliberately NOT on the list. For git, gh, openspec, the
 # test runners and review.sh every argument must be a literal word (no $expansions, globs or
 # braces, which could smuggle in an option), and git only runs read-only subcommands.
 # Blocked outright: command and process substitution ($( ) ` <( )), redirections other than
@@ -18,12 +19,12 @@
 # subcommands are denied, so git aliases from the user's config cannot be used either.
 # Test commands: exact `npm test`, `npm run test|lint|typecheck|check`, `go test|vet [./pkg/...]`,
 # `cargo test|clippy|check`, `make test|check|lint`, `pytest` with a few flags, `shellcheck`, and the
-# exact DEVFLOW_TEST_CMD read from the MAIN worktree's .spec-devflow.conf (never from the
-# worktree under review). Limit: those runners execute the project's own code, and review.sh is
+# exact DEVFLOW_TEST_CMD (compared with the whole command line, so it may contain && or |) read from
+# the MAIN worktree's .spec-devflow.conf (never from the worktree under review). Limit: those runners execute the project's own code, and review.sh is
 # whatever copy the reviewed change contains; review untrusted changes in a sandbox.
 set -uo pipefail
 
-READ_CMDS=" ls cat head tail wc cut tr nl tac column diff cmp jq grep egrep fgrep stat pwd echo printf true false basename dirname realpath readlink cd test [ [[ : "
+READ_CMDS=" ls cat head tail wc cut tr nl tac column diff cmp jq grep egrep fgrep stat pwd echo true false basename dirname realpath readlink : "
 GIT_SUBS=" status log diff show rev-parse rev-list ls-files ls-tree cat-file blame shortlog describe merge-base name-rev grep diff-tree diff-index for-each-ref show-ref count-objects check-ignore whatchanged range-diff show-branch var version cherry "
 BRANCH_READ_OPTS=" -a -r -v -vv --list -l --show-current --all --remotes --no-color --color "
 
@@ -53,6 +54,9 @@ else
 fi
 [ -n "$cmd" ] || exit 0
 
+# The exact trusted test command (read below), compared with the whole raw command line.
+raw_cmd="${cmd#"${cmd%%[![:space:]]*}"}"; raw_cmd="${raw_cmd%"${raw_cmd##*[![:space:]]}"}"
+
 # Redirections that cannot write anywhere are dropped before tokenizing; each must be a whole token
 # (`>&1foo` and `>/dev/nullx` are file redirections and stay in the text, where `>` is then blocked).
 B='([[:space:];&|)]|$)'
@@ -64,6 +68,8 @@ common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || t
 if [ -n "$common" ] && [ -f "${common%/.git}/.spec-devflow.conf" ]; then
   TEST_CMD="$(sed -n 's/^DEVFLOW_TEST_CMD=//p' "${common%/.git}/.spec-devflow.conf" | head -n1 | sed -E "s/^[\"']//; s/[\"']\$//")"
 fi
+
+[ -z "$TEST_CMD" ] || [ "$raw_cmd" != "$TEST_CMD" ] || exit 0
 
 # --- per-command checks --------------------------------------------------------------------------
 W=(); D=(); G=()      # words, "came from an expansion", "contains an unquoted glob/brace"
@@ -82,13 +88,21 @@ only_paths_or() { local k="$1" a f ok; shift; while [ "$k" -lt "$nargs" ]; do a=
   case "$a" in -*) for f in "$@"; do [ "$a" != "$f" ] || ok=1; done;; *[!A-Za-z0-9_./:@-]*) ;; *) ok=1;; esac
   [ "$ok" = 1 ] || block "argument '$a' is not allowed here"; k=$((k+1)); done; }
 
+# The skill's own review.sh: this guard's sibling, or the conventional install path (relative or absolute).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+is_skill_review() {
+  case "$1" in
+    "$SCRIPT_DIR/review.sh"|.claude/skills/spec-devflow/scripts/review.sh|./.claude/skills/spec-devflow/scripts/review.sh|/*/.claude/skills/spec-devflow/scripts/review.sh) return 0;;
+  esac
+  return 1
+}
+
 check_git() {
   local j="$1" a sub
   literal_args "$j"
   while [ "$j" -lt "$nargs" ]; do
     a="${W[$j]}"
     case "$a" in
-      -C) [ $((j+1)) -lt "$nargs" ] || block "git -C needs a directory"; j=$((j+2));;
       --no-pager|--no-optional-locks|-P|--no-replace-objects|--literal-pathspecs|--glob-pathspecs|--noglob-pathspecs|--icase-pathspecs) j=$((j+1));;
       -*) block "git option '$a' is not allowed";;
       *) break;;
@@ -108,8 +122,9 @@ check_git() {
     *) case "$GIT_SUBS" in *" $sub "*) ;; *) block "'git $sub' is not on the allowlist (read-only git only)";; esac;;
   esac
   # Options that write a file or launch a program, including git's unique-prefix abbreviations
-  # (`--open` is `--open-files-in-pager`, `--out` is `--output`, `--ext` is `--ext-diff`).
-  has_arg "$j" -o '-O*' '--op*' '--ou*' '--ext*' && block "git option that writes files or runs programs"
+  # (`--open` is `--open-files-in-pager`, `--out` is `--output`, `--ext` is `--ext-diff`) and short-flag
+  # bundles that end in the optional-argument -O (`git grep -iOprog` runs prog).
+  has_arg "$j" -o '-O*' '-[!-]*O*' '--op*' '--ou*' '--ext*' && block "git option that writes files or runs programs"
   return 0
 }
 
@@ -125,16 +140,15 @@ check_segment() {
   [ "${D[$i]}" = 0 ] || block "the command name must not come from an expansion"
   case "$w" in *=*) block "environment assignments before a command are not allowed";; esac
 
-  # The exact trusted test command (no extra arguments).
-  if [ -n "$TEST_CMD" ] && [ "${W[*]:$i}" = "$TEST_CMD" ]; then return 0; fi
-
   local from=$((i+1)) a1="${W[$((i+1))]:-}" a2="${W[$((i+2))]:-}"
-  # review.sh: directly or as `bash <path>`; only context|status
+  # review.sh: directly or as `bash <path>`; only context|status, and only the skill's own copy
   if [ "$w" = bash ]; then
-    case "$a1" in scripts/review.sh|./scripts/review.sh|*/scripts/review.sh) w="$a1"; from=$((from+1)); a1="$a2";; *) block "'bash' may only run review.sh context|status";; esac
+    is_skill_review "$a1" || block "'bash' may only run the skill's review.sh context|status"
+    w="$a1"; from=$((from+1)); a1="$a2"
   fi
   case "$w" in
-    scripts/review.sh|./scripts/review.sh|*/scripts/review.sh)
+    *review.sh)
+      is_skill_review "$w" || block "review.sh must be run through the skill path (.claude/skills/spec-devflow/scripts/review.sh)"
       case "$a1" in context|status) literal_args "$from"; return 0;; *) block "only 'review.sh context|status' is allowed";; esac;;
     */*) block "commands must be bare names on the allowlist (no paths): $w";;
   esac
@@ -144,7 +158,7 @@ check_segment() {
   case "$name" in
     git) check_git "$from"; return 0;;
     openspec) literal_args "$from"; case "$a1" in validate|list|show|status|--version|-v) return 0;; *) block "only 'openspec validate|list|show|status' is allowed";; esac;;
-    gh) literal_args "$from"; case "$a1 $a2" in "pr view"|"pr diff"|"pr checks"|"pr list"|"issue view"|"issue list") return 0;; *) block "only read-only 'gh pr|issue view|diff|checks|list' is allowed";; esac;;
+    gh) literal_args "$from"; has_arg "$from" --web -w && block "gh --web launches a browser"; case "$a1 $a2" in "pr view"|"pr diff"|"pr checks"|"pr list"|"issue view"|"issue list") return 0;; *) block "only read-only 'gh pr|issue view|diff|checks|list' is allowed";; esac;;
     npm|pnpm|yarn)
       case "$nargs:$a1:$a2" in "$((i+2)):test:"|"$((i+2)):t:"|"$((i+3)):run:test"|"$((i+3)):run:lint"|"$((i+3)):run:typecheck"|"$((i+3)):run:check") literal_args "$from"; return 0;; esac
       block "only exactly '$name test' or '$name run test|lint|typecheck|check' is allowed";;

@@ -37,7 +37,7 @@ desc_of() {
 # (`ls > f`) is NOT split, hence the trailing "*>*" deny. Patterns match the raw command text, so quoting
 # tricks are only partly covered (see the deny lists below and references/code-review.md).
 # Keep in sync with scripts/reviewer-bash-guard.sh (the Claude Code side is stricter).
-REVIEWER_ALLOW_CMDS="ls cat head tail wc cut tr nl tac column diff cmp jq grep egrep fgrep stat pwd echo basename dirname realpath readlink cd test"
+REVIEWER_ALLOW_CMDS="ls cat head tail wc cut tr nl tac column diff cmp jq grep egrep fgrep stat pwd echo basename dirname realpath readlink"
 REVIEWER_ALLOW_GIT="status log diff show rev-parse rev-list ls-files ls-tree cat-file blame shortlog describe merge-base name-rev grep diff-tree diff-index for-each-ref show-ref count-objects check-ignore whatchanged range-diff show-branch var version cherry"
 # cmd and "cmd *" (arguments allowed)
 REVIEWER_ALLOW_ARGS="openspec validate|openspec list|openspec show|openspec status|gh pr view|gh pr diff|gh pr checks|gh pr list|gh issue view|gh issue list|git branch --list|git stash list|git stash show|git worktree list|shellcheck"
@@ -45,7 +45,7 @@ REVIEWER_ALLOW_ARGS="openspec validate|openspec list|openspec show|openspec stat
 REVIEWER_ALLOW_EXACT="npm test|npm run test|npm run lint|npm run typecheck|npm run check|make test|make check|make lint|go test ./...|go vet ./...|cargo test|cargo clippy|cargo check|pytest|git branch|git branch -a|git branch -r|git branch -v|git branch -vv|git branch --show-current"
 # Denied whatever the command: redirections, and git options that write or run programs (incl. git's
 # unique-prefix abbreviations: --open=..., --out=..., --ext=...), git with expansions/braces/empty-quote splices.
-REVIEWER_DENY_ARGS='*>*|git *-O*|git *--op*|git *--ou*|git *--ext*|git *$*|git *{*|git *""*|git *'"''"'*'
+REVIEWER_DENY_ARGS='*>*|gh *--web*|git *-O*|git grep *-*O*|git *--op*|git *--ou*|git *--ext*|git *$*|git *{*|git *""*|git *'"''"'*'
 
 # One "cmd" rule and one "cmd *" rule (a bare glob "cmd*" would also match "cmdevil").
 allow_pair() { printf '    %s: allow\n    %s: allow\n' "$(yq_str "$1")" "$(yq_str "$1 *")"; }
@@ -110,7 +110,7 @@ render_opencode() {
       each_item allow_exact "$REVIEWER_ALLOW_EXACT"
       review_allow
       # The exact test command from the trusted (main worktree) config.
-      [ -z "${DEVFLOW_TEST_CMD:-}" ] || allow_exact "$DEVFLOW_TEST_CMD"
+      case "${DEVFLOW_TEST_CMD:-}" in ''|*[\*\?\[]*) ;; *) allow_exact "$DEVFLOW_TEST_CMD";; esac   # glob characters would act as wildcards
       each_item deny_one "$REVIEWER_DENY_ARGS";;
     planner) printf 'temperature: 0.2\n';;
   esac
