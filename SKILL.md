@@ -34,6 +34,7 @@ bash <skill-dir>/scripts/agents.sh status
 
 - `in_linked_worktree=yes` → you are already isolated (typical when Orca or `claude --worktree` launched you). **Do not nest worktrees**: if the branch matches the task, work here; otherwise say so and ask.
 - `identity.sh` reports `mode=human` with `status=missing` → stop and ask the user to set `git config user.name` / `user.email`. Never invent an identity and never use Claude's in human mode.
+- `setup_needed=yes` (the skill was just installed, e.g. with `npx skills add`; `openspec/` or the generated agents are missing) → offer once to run `bash <skill-dir>/scripts/setup.sh --hooks` from the repo root, after `gh`/`openspec` are OK and with the user's approval, then show the `git add … && git commit` line it prints and tell the user to restart the session so the new agents load. Setup is a one-time bootstrap, not a change: it does not need a worktree, and it commits nothing by itself.
 - `gh` not authenticated or `openspec` missing → stop and tell the user what to install (`references/setup.md`).
 - `agents.sh status` shows `missing` → the per-phase agents aren't generated; offer `agents.sh generate` once (see "Models per phase"), or work inline.
 - `repo_policy` lists recommendations (e.g. no required PR or approvals on the default branch) → mention them once to the user; don't change repo settings yourself.

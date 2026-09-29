@@ -13,17 +13,21 @@ git ≥ 2.32 · [gh](https://cli.github.com) authenticated as yourself · [OpenS
 From the root of the project you want to use it in (a git repository):
 
 ```bash
-git clone --depth 1 https://github.com/maorodriguez/spec-devflow .claude/skills/spec-devflow \
-  && rm -rf .claude/skills/spec-devflow/.git \
-  && bash .claude/skills/spec-devflow/scripts/setup.sh --hooks
+npx skills add maorodriguez/spec-devflow -a claude-code --copy
+```
+
+That copies the skill into `.claude/skills/spec-devflow` (read by both Claude Code and OpenCode). `--copy` matters: the skill must be committed inside the repo so every worktree has it, and a symlink into `.agents/skills/` would also make OpenCode see it twice. Then restart your agent and ask for anything (e.g. "work on #42"): on first use the skill notices that `openspec/` and the agents are missing (`setup_needed=yes`) and offers to run `setup.sh` for you. Or run it yourself:
+
+```bash
+bash .claude/skills/spec-devflow/scripts/setup.sh --hooks
 git add .claude/agents/devflow-* .claude/skills/spec-devflow .claude/skills/openspec-* .claude/commands/opsx \
         .opencode/agents/devflow-* .opencode/commands/opsx-* .opencode/skills/openspec-* openspec   # or the exact line setup.sh prints
 git commit -m "chore: add spec-devflow"
 ```
 
-`.claude/skills` is read by both Claude Code and OpenCode. Removing the clone's `.git` keeps it from being committed as a nested repository. `setup.sh` runs `openspec init` (if `openspec/` is missing) and generates the planner / implementer / reviewer agents; `--hooks` also installs the commit-msg hook that strips AI attribution (optional). Restart your Claude Code session afterwards so it picks up the new agents.
+`setup.sh` runs `openspec init` (if `openspec/` is missing) and generates the planner / implementer / reviewer agents; `--hooks` also installs the commit-msg hook that strips AI attribution (optional). Restart your Claude Code session afterwards so it picks up the new agents. Without the CLI, `git clone --depth 1 https://github.com/maorodriguez/spec-devflow .claude/skills/spec-devflow && rm -rf .claude/skills/spec-devflow/.git` is equivalent.
 
-To update, repeat the clone into a temporary folder and replace `.claude/skills/spec-devflow`, then rerun `setup.sh`.
+To update, rerun the `npx skills add` command (or replace `.claude/skills/spec-devflow` with a fresh clone), then rerun `setup.sh`.
 
 Optional team config in `.spec-devflow.conf` (models per phase, archive timing, merge strategy, test command). See `references/setup.md`.
 

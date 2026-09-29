@@ -16,13 +16,14 @@ Each person also needs their git identity set (`git config user.name` / `user.em
 Commit it so it exists in **every worktree** and both Claude Code and OpenCode share it. The skill folder must be named `spec-devflow`:
 
 ```bash
-git clone --depth 1 https://github.com/maorodriguez/spec-devflow .claude/skills/spec-devflow
-rm -rf .claude/skills/spec-devflow/.git     # avoid committing a nested repository
+npx skills add maorodriguez/spec-devflow -a claude-code --copy   # installs into .claude/skills/spec-devflow
 bash .claude/skills/spec-devflow/scripts/setup.sh --hooks   # openspec init + agents (+ commit-msg hook)
 git add .claude/agents/devflow-* .claude/skills/spec-devflow .claude/skills/openspec-* .claude/commands/opsx \
         .opencode/agents/devflow-* .opencode/commands/opsx-* .opencode/skills/openspec-* openspec   # or the exact line setup.sh prints
 git commit -m "chore: add spec-devflow"
 ```
+
+Use `-a claude-code --copy`: the skills CLI otherwise installs into a canonical `.agents/skills/` and symlinks it into each agent's directory, which breaks committing the skill into every worktree and makes OpenCode see it twice. The `setup.sh` step can be skipped: `devflow-env.sh` reports `setup_needed=yes` when `openspec/` or the agents are missing, and the skill then offers to run it (with the user's approval) on first use. Without the CLI, `git clone --depth 1 https://github.com/maorodriguez/spec-devflow .claude/skills/spec-devflow && rm -rf .claude/skills/spec-devflow/.git` is equivalent.
 
 `setup.sh` covers the next section's `openspec init` and the agent generation, so only the English pin and optional config below remain manual.
 
