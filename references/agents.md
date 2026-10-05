@@ -39,6 +39,29 @@ When done, reply with: commits created, tests run and their result, open questio
 
 (The orchestrator ticks the boxes when integrating, so `tasks.md` has a single owner.)
 
+## Bulk apply: one worktree and one agent per change
+
+The pattern above splits the tasks of one change. To apply several independent, approved changes at once, use one worktree and one `devflow-implementer` per **change** (SKILL.md, "Bulk apply"): `scripts/bulk.sh list` to see what is eligible, `bulk.sh new <change>…` for the worktrees and `bulk.sh prompt <change> --worktree <path>` for each worker's prompt. Differences with task-level parallelism:
+
+- Each worker owns the `tasks.md` of its own change (nobody else touches that worktree) and keeps its own branch and PR.
+- Each worker applies and then verifies before it reports; the prompt requires it.
+- Nothing is pushed, merged or archived; the orchestrator asks the user first.
+
+Report every worker must return, and the orchestrator shows consolidated, one block per change:
+
+```
+- Change: <change-id>
+- Status: ready-for-review | blocked | partial
+- Verification: <what was run and the result>
+- Files changed: <list>
+- Commits: <hashes and subjects>
+- Tests run: <commands and results>
+- Blockers / open questions: <list or none>
+- Not done: no push, no PR, no merge, no archive.
+```
+
+Closing line of the orchestrator: "No merge, archive or push was done. Tell me which changes you approve to continue with push and PR."
+
 ## Claude Code
 
 - **Sub-agents with native isolation**: a sub-agent in `.claude/agents/` with `isolation: worktree` in its frontmatter always runs in its own temporary worktree and inherits the isolation checks. By default those worktrees start from the default branch; to start from the change branch, set in `.claude/settings.json`:

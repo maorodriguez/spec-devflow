@@ -4,7 +4,7 @@ description: 'Spec-driven development flow with OpenSpec + GitHub (issues, branc
 license: MIT
 compatibility: claude-code, opencode; requires git >= 2.32, authenticated gh CLI and @fission-ai/openspec >= 1.x; Orca CLI optional
 metadata:
-  version: "0.6.1"
+  version: "0.7.0"
   workflow: openspec-github-worktrees
 ---
 
@@ -237,6 +237,19 @@ Whatever the mode, these mean: pause, explain the boundary, and ask the user to 
 - Working on a proposal or archive from the main checkout instead of a worktree.
 - Committing, branching, pushing or merging outside this flow, or auto-merging, without the user's explicit say-so.
 - Leaving the archive and spec-sync changes uncommitted at the end of the flow.
+- Using bulk apply for a single change, or letting a bulk worker push, open a PR, merge or archive.
+
+## Bulk apply (optional, several changes in parallel)
+
+When two or more approved changes are waiting and the user did not name one, apply them concurrently: one isolated worktree, one `devflow-implementer` and one PR per change. Never use it for a single change or when the user names one; that is the normal flow.
+
+1. **Pick the changes.** `bash <skill-dir>/scripts/bulk.sh list` reads `openspec/changes/*` from the default branch (git, not the working tree) and reports pending tasks, `eligible` and the reason. With the proposal gate on, a change is eligible only once its proposal is on the default branch. With the gate off the helper cannot know whether a change is approved: ask the user to confirm each one (`needs_confirmation`). Choose changes that do not touch the same files.
+2. **Create the worktrees.** `bulk.sh new <change> <change>…` creates one worktree and branch per change through `wt.sh` and prints them as JSON. It refuses fewer than two changes, any ineligible change and any change that already has a worktree or branch, and creates nothing in those cases.
+3. **Delegate.** For each change, `bulk.sh prompt <change> --worktree <path>` prints the self-contained English prompt; pass it to a `devflow-implementer` (model per `references/models.md`, one agent per worktree, in parallel). Each worker applies its change **and then verifies it** (`/opsx:verify`, or the manual check of step 5) before reporting, owns the `tasks.md` of its own change and commits through `commit.sh`.
+4. **Consolidate.** Collect one report per change (template in `references/agents.md`): status, verification, files changed, commits, tests, blockers. A worker that did not verify is not ready for review. Show the user all reports together, blocked ones included.
+5. **Stop there.** The run performs no push, PR, merge or archive, and the final message says so and asks for explicit approval before any of them. Each change then continues alone through steps 4–10 (push and draft PR with confirmation, agent review, ready, merge, clean up with `wt.sh remove`).
+
+The orchestrator never edits inside a worker's worktree. `bulk.sh` has no push, merge, archive or PR code, and `tests/bulk.sh` checks that.
 
 ## Identity
 
@@ -273,6 +286,7 @@ If the change's worktree exists, work there. Otherwise (another machine or agent
 - `references/github.md` — commit format, trailers, branch names, `gh` commands, issue ↔ change ↔ PR linking, merge policy and recommended branch protection. Read before the first commit, PR or merge of a session.
 - `references/worktrees.md` — worktree location per runtime, `.worktreeinclude`, dependencies, cleanup, troubleshooting.
 - `references/orca.md` — Orca CLI, detection, checkpoints, `orca.yaml`, dispatching agents. Read if `orca_available=yes`.
+- `scripts/bulk.sh` — helper for bulk apply (`list`, `new`, `prompt`); `tests/bulk.sh` is its regression suite.
 - `scripts/proposal-gate.sh` — the two-PR gate checks (`--stage apply|archive`); `tests/proposal-gate.sh` is its regression suite.
 - `references/models.md` — models per phase, `.spec-devflow.conf` keys, generating and invoking the phase agents.
 - `references/code-review.md` — agent code review procedure, checklist, severities and exact report format. Read before step 7.
