@@ -17,6 +17,7 @@
 # The reference is the default branch. With DEVFLOW_PROPOSAL_GATE=main it can only be the default branch and a
 # change is eligible once its proposal is there; with the gate off --ref may name an integration branch and the
 # user's confirmation that the change is approved is still required (needs_confirmation).
+# DEVFLOW_WT_SH overrides the wt.sh used by `new` (a test hook for failure injection).
 # This script never pushes, merges, archives, comments or opens pull requests.
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,28 +25,52 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib.sh"
 
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not inside a git repository"
+WT_SH="${DEVFLOW_WT_SH:-$SCRIPT_DIR/wt.sh}"
 PENDING_RE='^[[:space:]]*[-*][[:space:]]+\[[[:space:]]\]'
 DONE_RE='^[[:space:]]*[-*][[:space:]]+\[[xX]\]'
 
 usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
-# JSON string escaping for the values we print (backslash, double quote, newline, tab, carriage return).
+# JSON string escaping: backslash, double quote and every control character below U+0020.
 jstr() {
-  local v="$1"
-  v="${v//\\/\\\\}"; v="${v//\"/\\\"}"; v="${v//$'\n'/\\n}"; v="${v//$'\t'/\\t}"; v="${v//$'\r'/\\r}"
-  printf '%s' "$v"
+  local s="$1" out="" ch code i
+  case "$s" in *[\\\"[:cntrl:]]*) ;; *) printf '%s' "$s"; return;; esac
+  for ((i = 0; i < ${#s}; i++)); do
+    ch="${s:i:1}"
+    case "$ch" in
+      '\') out="$out\\\\";;
+      '"') out="$out\\\"";;
+      *)
+        code="$(printf '%d' "'$ch" 2>/dev/null || echo 255)"
+        if [ "$code" -lt 32 ] 2>/dev/null; then
+          case "$code" in
+            9) out="$out\\t";;
+            10) out="$out\\n";;
+            13) out="$out\\r";;
+            *) out="$out$(printf '\\u%04x' "$code")";;
+          esac
+        else
+          out="$out$ch"
+        fi;;
+    esac
+  done
+  printf '%s' "$out"
 }
+
+# True when the argument is a non-empty string of digits only (newlines and anything else are rejected).
+is_digits() { case "$1" in ''|*[!0-9]*) return 1;; esac; return 0; }
 
 # Prints what already exists for a change the way the normal flow would find it: branches (local or origin,
 # any type, optional issue number) and worktrees on such branches in any folder, or a worktree at the
 # conventional path of this run.
-existing_work() { # $1 = change, $2 = type, $3 = worktree root
+existing_work() { # $1 = change, $2 = type, $3 = worktree root, $4 = issue (optional)
   local c="$1" type="$2" root="$3" re found=""
   re="(^|/)([0-9]+-)?$c\$"
   found="$(git for-each-ref --format='%(refname:short)' refs/heads refs/remotes/origin | grep -E "$re" | paste -sd' ' - || true)"
   [ -z "$found" ] || printf 'branch %s; ' "$found"
   git worktree list --porcelain | grep -E "^branch refs/heads/(.*/)?([0-9]+-)?$c\$" >/dev/null && printf 'worktree on a matching branch; '
   [ ! -e "$root/$type-$c" ] || printf 'path %s; ' "$root/$type-$c"
+  [ -z "${4:-}" ] || [ ! -e "$root/$type-$4-$c" ] || printf 'path %s; ' "$root/$type-$4-$c"
   return 0
 }
 
@@ -137,7 +162,7 @@ cmd_new() {
   # <change> or <change>:<issue>; duplicates and fewer than two changes are refused before anything else.
   for spec in ${specs[@]+"${specs[@]}"}; do
     c="${spec%%:*}"; i=""
-    case "$spec" in *:*) i="${spec#*:}"; printf '%s' "$i" | grep -Eq '^[0-9]+$' || die "invalid issue number in '$spec' (use <change>:<number>)";; esac
+    case "$spec" in *:*) i="${spec#*:}"; is_digits "$i" || die "invalid issue number in '$spec' (use <change>:<number>)";; esac
     is_kebab "$c" || die "invalid change id: $c"
     for n in ${names[@]+"${names[@]}"}; do [ "$n" != "$c" ] || die "change '$c' is given more than once"; done
     names+=("$c"); issues+=("$i")
@@ -146,10 +171,12 @@ cmd_new() {
   resolve_ref "$ref" "$nofetch"
   base_commit="$(git rev-parse --verify "$REF^{commit}")"
   root="$(worktree_root)"
+  j=0
   for c in "${names[@]}"; do
     assess "$c"
     [ "$C_ELIGIBLE" = true ] || bad="$bad $c($C_REASON)"
-    w="$(existing_work "$c" "$type" "$root")"
+    w="$(existing_work "$c" "$type" "$root" "${issues[$j]}")"
+    j=$((j + 1))
     [ -z "$w" ] || exists="$exists $c($w)"
   done
   [ -z "$bad" ] || die "not eligible:$bad"
@@ -157,23 +184,31 @@ cmd_new() {
   j=0
   for c in "${names[@]}"; do
     i="${issues[$j]}"; j=$((j + 1))
-    if out="$(bash "$SCRIPT_DIR/wt.sh" new "$type" "$c" ${i:+--issue "$i"} --base "$REF" --no-fetch)"; then
+    if out="$(bash "$WT_SH" new "$type" "$c" ${i:+--issue "$i"} --base "$REF" --no-fetch)"; then
       path="$(printf '%s\n' "$out" | sed -n 's/^worktree=//p')"
       branch="$(printf '%s\n' "$out" | sed -n 's/^branch=//p')"
       created_paths+=("$path"); created_branches+=("$branch")
       entries+=("$(printf '  {"change":"%s","issue":%s,"worktree":"%s","branch":"%s","base":"%s"}' "$(jstr "$c")" "${i:-null}" "$(jstr "$path")" "$(jstr "$branch")" "$(jstr "$REF")")")
     else
-      # Roll back what this run created: the worktree through wt.sh (it refuses uncommitted work) and the branch
-      # only when it still points at the base commit, so nothing a worker committed can be lost.
+      # The failing creation may have left its own worktree behind: include it in the rollback.
+      path="$root/$type-${i:+$i-}$c"; branch="$type/${i:+$i-}$c"
+      if git worktree list --porcelain | grep -Fqx "worktree $path"; then created_paths+=("$path"); created_branches+=("$branch"); fi
+      # Roll back what this run created. wt.sh remove is not used: it refuses a branch whose commits are not on a
+      # remote, which every fresh branch is when the base is local. Instead each worktree is removed only while it
+      # is clean and still at the base commit, and its branch only while its tip is the base commit, so nothing a
+      # worker committed can be lost. Whatever cannot be proven untouched stays and is reported.
       n=$(( ${#created_paths[@]} - 1 ))
       while [ "$n" -ge 0 ]; do
-        bash "$SCRIPT_DIR/wt.sh" remove "${created_paths[$n]}" --delete-branch >/dev/null 2>&1 || leftover="$leftover ${created_paths[$n]}"
-        if [ "$(git rev-parse --verify --quiet "refs/heads/${created_branches[$n]}" || true)" = "$base_commit" ]; then
-          git branch -D "${created_branches[$n]}" >/dev/null 2>&1 || true
+        path="${created_paths[$n]}"; branch="${created_branches[$n]}"
+        if [ -z "$(git -C "$path" status --porcelain 2>/dev/null)" ] && [ "$(git -C "$path" rev-parse HEAD 2>/dev/null)" = "$base_commit" ]; then
+          git worktree remove "$path" >/dev/null 2>&1 || leftover="$leftover $path($branch)"
+          if [ "$(git rev-parse --verify --quiet "refs/heads/$branch" || true)" = "$base_commit" ]; then git branch -D "$branch" >/dev/null 2>&1 || true; fi
+        else
+          leftover="$leftover $path($branch)"
         fi
         n=$((n - 1))
       done
-      if [ -n "$leftover" ]; then die "creating the worktree of '$c' failed; could not remove what was created before it:$leftover (wt.sh remove <path> --delete-branch)"; fi
+      if [ -n "$leftover" ]; then die "creating the worktree of '$c' failed; could not remove:$leftover; inspect them, then git worktree remove <path> and git branch -D <branch>"; fi
       die "creating the worktree of '$c' failed; everything created before it was removed"
     fi
   done
@@ -198,7 +233,7 @@ cmd_prompt() {
     esac
   done
   [ -n "$change" ] && [ -n "$wt" ] || die "usage: bulk.sh prompt <change> --worktree PATH [--issue N]"
-  [ -z "$issue" ] || printf '%s' "$issue" | grep -Eq '^[0-9]+$' || die "--issue must be a number"
+  [ -z "$issue" ] || is_digits "$issue" || die "--issue must be a number"
   [ -d "$wt" ] || die "worktree not found: $wt"
   wt="$(cd "$wt" && pwd -P)"
   tasks_file="$wt/openspec/changes/$change/tasks.md"

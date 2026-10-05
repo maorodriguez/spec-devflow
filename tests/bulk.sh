@@ -132,15 +132,55 @@ saw 0 "...and the worktree" "worktree on a matching branch" "$tmp/err"
 git worktree remove "$tmp/elsewhere"; git branch -q -D chore/7-beta
 check "nothing was created" nothing_created
 
+echo "== new: path and issue checks"
+mkdir -p "$tmp/wts/feat-5-beta"
+expect 1 "a directory at the issue-numbered worktree path is refused up front" run off new alpha beta:5 --no-fetch
+saw 0 "...as an up-front refusal naming the change" "already has a worktree or branch: beta(path" "$tmp/err"
+saw 0 "...and the path" "feat-5-beta" "$tmp/err"
+saw 1 "...not as a creation that failed and was rolled back" "creating the worktree of" "$tmp/err"
+check "nothing else was created" test -z "$(ls "$tmp/wts" | grep -v '^feat-5-beta$')"
+rmdir "$tmp/wts/feat-5-beta"; rmdir "$tmp/wts" 2>/dev/null
+expect 1 "an issue with a line break is refused by new" run off new "alpha:42"$'\n'"x" beta --no-fetch
+saw 0 "...saying why" "invalid issue number" "$tmp/err"
+check "...creating nothing" nothing_created
+
 echo "== new: rollback when a creation fails"
-gitdir="$(git rev-parse --git-common-dir)"; mkdir -p "$gitdir/refs/heads/feat"; touch "$gitdir/refs/heads/feat/beta.lock"
-expect 1 "a failure on the second change fails the run" run off new alpha beta --no-fetch
+# DEVFLOW_WT_SH injects the failure on every ref backend: the wrapper runs the real wt.sh and fails the 2nd `new`
+# (FAIL_MODE=before: without running it; after: after it created the worktree; dirty: after it, leaving a file).
+cat > "$tmp/wt-fail.sh" <<'WRAP'
+#!/usr/bin/env bash
+n="$(cat "$COUNT" 2>/dev/null || echo 0)"; n=$((n + 1)); echo "$n" > "$COUNT"
+if [ "$1" = new ] && [ "$n" -ge 2 ]; then
+  [ "$FAIL_MODE" != before ] || { echo "injected failure" >&2; exit 1; }
+  out="$(bash "$REAL_WT" "$@")" || exit 1
+  [ "$FAIL_MODE" != dirty ] || touch "$(printf '%s\n' "$out" | sed -n 's/^worktree=//p')/dirty"
+  echo "injected failure after creating" >&2; exit 1
+fi
+exec bash "$REAL_WT" "$@"
+WRAP
+failing() { # $1 = FAIL_MODE, rest = bulk.sh args (gate off)
+  local mode="$1"; shift; rm -f "$tmp/count"
+  ( export DEVFLOW_WT_SH="$tmp/wt-fail.sh" COUNT="$tmp/count" FAIL_MODE="$mode" REAL_WT="$ROOT/scripts/wt.sh"; run off "$@" )
+}
+expect 1 "a failure on the second change fails the run" failing before new alpha beta --no-fetch
 check "...printing no JSON" test ! -s "$tmp/out"
 saw 0 "...saying everything was removed" "everything created before it was removed" "$tmp/err"
 check "...removing the first worktree" test ! -e "$tmp/wts/feat-alpha"
 check "...and its branch" test -z "$(git branch --list feat/alpha)"
 check "...leaving only the main worktree" nothing_created
-rm -f "$gitdir/refs/heads/feat/beta.lock"
+expect 1 "the rollback also works when the base is a local branch" failing before new alpha beta --ref integ --no-fetch
+saw 0 "...removing everything" "everything created before it was removed" "$tmp/err"
+check "...leaving only the main worktree" nothing_created
+check "...and no leftover branch" test -z "$(git branch --list 'feat/alpha' 'feat/beta')"
+expect 1 "a creation that fails after making its worktree is rolled back too" failing after new alpha beta --no-fetch
+check "...removing both worktrees" nothing_created
+check "...and both branches" test -z "$(git branch --list 'feat/alpha' 'feat/beta')"
+expect 1 "a failed worktree with uncommitted files is kept and reported" failing dirty new alpha beta --no-fetch
+saw 0 "...naming what remains" "could not remove:" "$tmp/err"
+saw 0 "...with the branch" "(feat/beta)" "$tmp/err"
+check "...removing the clean first worktree" test ! -e "$tmp/wts/feat-alpha"
+rm -f "$tmp/wts/feat-beta/dirty"; git worktree remove "$tmp/wts/feat-beta"; git branch -q -D feat/beta
+check "...and nothing else is left once cleaned" nothing_created
 
 echo "== new: success with an issue"
 expect 0 "two eligible changes get a worktree each" run off new alpha:42 beta --no-fetch
@@ -177,6 +217,8 @@ saw 1 "...no --issue flag" "--issue"
 expect 0 "an explicit --issue is accepted" run off prompt beta --worktree "$tmp/wts/feat-beta" --issue 7
 saw 0 "...and used" "--issue 7 --change beta"
 expect 1 "a missing worktree is rejected" run off prompt alpha --worktree "$tmp/nope"
+expect 1 "an issue with a line break is refused by prompt" run off prompt beta --worktree "$tmp/wts/feat-beta" --issue "7"$'\n'"x"
+saw 0 "...saying why" "--issue must be a number" "$tmp/err"
 git worktree add -q -b scratch/g "$tmp/gw" origin/main
 expect 1 "a change with no pending tasks is refused" run off prompt gamma --worktree "$tmp/gw"
 saw 0 "...saying there is nothing to apply" "nothing to apply" "$tmp/err"
@@ -186,11 +228,17 @@ saw 0 "...saying why" "detached HEAD" "$tmp/err"
 
 echo "== valid JSON for odd paths"
 for c in alpha beta; do git worktree remove "$tmp/wts/feat-${c/alpha/42-alpha}"; done; git branch -q -D feat/42-alpha feat/beta
-odd="$tmp/w\"q\\s"
+odd="$tmp/w\"q\\s"$'\001'
 ( export DEVFLOW_WORKTREE_ROOT="$odd"; run off new alpha beta --type chore --no-fetch ); r=$?
 check "a root with a quote and a backslash is accepted" test "$r" = 0
 valid_json "...and the output is valid JSON" "$tmp/out"
-saw 0 "...with both characters escaped" 'w\"q\\s/chore-alpha'
+saw 0 "...with quote, backslash and control character escaped" 'w\"q\\s\u0001/chore-alpha'
+for c in alpha beta; do git worktree remove "$odd/chore-$c"; done; git branch -q -D chore/alpha chore/beta
+ctl="$tmp/c"$'\001'"x"
+( export DEVFLOW_WORKTREE_ROOT="$ctl"; run off new alpha beta --type docs --no-fetch ); r=$?
+check "a root with only a control character is accepted" test "$r" = 0
+valid_json "...and the output is valid JSON" "$tmp/out"
+saw 0 "...with the control character escaped" 'c\u0001x/docs-alpha'
 
 echo "== the helper never publishes"
 if grep -nE 'git push|git merge|gh pr|gh api|openspec archive' "$BULK" >"$tmp/out"; then echo "  FAIL  bulk.sh contains publishing commands"; cat "$tmp/out"; fail=1; else echo "  ok    no push, merge, PR or archive commands in bulk.sh"; fi
