@@ -29,7 +29,7 @@ WT_SH="${DEVFLOW_WT_SH:-$SCRIPT_DIR/wt.sh}"
 PENDING_RE='^[[:space:]]*[-*][[:space:]]+\[[[:space:]]\]'
 DONE_RE='^[[:space:]]*[-*][[:space:]]+\[[xX]\]'
 
-usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit "${1:-0}"; }
 
 # JSON string escaping: backslash, double quote and every control character below U+0020.
 jstr() {
@@ -41,8 +41,8 @@ jstr() {
       '\') out="$out\\\\";;
       '"') out="$out\\\"";;
       *)
-        code="$(printf '%d' "'$ch" 2>/dev/null || echo 255)"
-        if [ "$code" -lt 32 ] 2>/dev/null; then
+        printf -v code '%d' "'$ch" 2>/dev/null || code=255   # bytes >= 0x80 may read as negative: they pass through
+        if [ "$code" -ge 0 ] && [ "$code" -lt 32 ]; then
           case "$code" in
             9) out="$out\\t";;
             10) out="$out\\n";;
@@ -59,6 +59,14 @@ jstr() {
 
 # True when the argument is a non-empty string of digits only (newlines and anything else are rejected).
 is_digits() { case "$1" in ''|*[!0-9]*) return 1;; esac; return 0; }
+
+# Resolved (symlink-free) form of a path that may not exist yet: git prints resolved paths, so comparisons need it.
+real_path() {
+  local p="$1" d
+  if [ -d "$p" ]; then (cd "$p" && pwd -P); return; fi
+  d="$(dirname "$p")"
+  if [ -d "$d" ]; then printf '%s/%s\n' "$(cd "$d" && pwd -P)" "$(basename "$p")"; else printf '%s\n' "$p"; fi
+}
 
 # Prints what already exists for a change the way the normal flow would find it: branches (local or origin,
 # any type, optional issue number) and worktrees on such branches in any folder, or a worktree at the
@@ -190,9 +198,14 @@ cmd_new() {
       created_paths+=("$path"); created_branches+=("$branch")
       entries+=("$(printf '  {"change":"%s","issue":%s,"worktree":"%s","branch":"%s","base":"%s"}' "$(jstr "$c")" "${i:-null}" "$(jstr "$path")" "$(jstr "$branch")" "$(jstr "$REF")")")
     else
-      # The failing creation may have left its own worktree behind: include it in the rollback.
-      path="$root/$type-${i:+$i-}$c"; branch="$type/${i:+$i-}$c"
-      if git worktree list --porcelain | grep -Fqx "worktree $path"; then created_paths+=("$path"); created_branches+=("$branch"); fi
+      # The failing creation may have left its own worktree and/or branch behind: include them in the rollback.
+      # existing_work proved the branch did not exist before this run, so it is ours to clean up.
+      path="$(real_path "$root/$type-${i:+$i-}$c")"; branch="$type/${i:+$i-}$c"
+      if git worktree list --porcelain | grep -Fqx "worktree $path"; then
+        created_paths+=("$path"); created_branches+=("$branch")
+      elif git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+        created_paths+=(""); created_branches+=("$branch")
+      fi
       # Roll back what this run created. wt.sh remove is not used: it refuses a branch whose commits are not on a
       # remote, which every fresh branch is when the base is local. Instead each worktree is removed only while it
       # is clean and still at the base commit, and its branch only while its tip is the base commit, so nothing a
@@ -200,13 +213,19 @@ cmd_new() {
       n=$(( ${#created_paths[@]} - 1 ))
       while [ "$n" -ge 0 ]; do
         path="${created_paths[$n]}"; branch="${created_branches[$n]}"
-        if [ -z "$(git -C "$path" status --porcelain 2>/dev/null)" ] && [ "$(git -C "$path" rev-parse HEAD 2>/dev/null)" = "$base_commit" ]; then
-          git worktree remove "$path" >/dev/null 2>&1 || leftover="$leftover $path($branch)"
+        if [ -z "$path" ] || { [ -z "$(git -C "$path" status --porcelain 2>/dev/null)" ] && [ "$(git -C "$path" rev-parse HEAD 2>/dev/null)" = "$base_commit" ]; }; then
+          [ -z "$path" ] || git worktree remove "$path" >/dev/null 2>&1 || true
           if [ "$(git rev-parse --verify --quiet "refs/heads/$branch" || true)" = "$base_commit" ]; then git branch -D "$branch" >/dev/null 2>&1 || true; fi
-        else
-          leftover="$leftover $path($branch)"
         fi
         n=$((n - 1))
+      done
+      # Report only what verifiably remains; never claim success on the strength of exit codes.
+      n=0
+      while [ "$n" -lt "${#created_paths[@]}" ]; do
+        if { [ -n "${created_paths[$n]}" ] && [ -e "${created_paths[$n]}" ]; } || git rev-parse --verify --quiet "refs/heads/${created_branches[$n]}" >/dev/null; then
+          leftover="$leftover ${created_paths[$n]:-(no worktree)}(${created_branches[$n]})"
+        fi
+        n=$((n + 1))
       done
       if [ -n "$leftover" ]; then die "creating the worktree of '$c' failed; could not remove:$leftover; inspect them, then git worktree remove <path> and git branch -D <branch>"; fi
       die "creating the worktree of '$c' failed; everything created before it was removed"

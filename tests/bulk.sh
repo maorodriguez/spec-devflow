@@ -146,12 +146,14 @@ check "...creating nothing" nothing_created
 
 echo "== new: rollback when a creation fails"
 # DEVFLOW_WT_SH injects the failure on every ref backend: the wrapper runs the real wt.sh and fails the 2nd `new`
-# (FAIL_MODE=before: without running it; after: after it created the worktree; dirty: after it, leaving a file).
+# (FAIL_MODE=before: without running it; after: after it created the worktree; dirty: after it, leaving a file;
+# branchonly: only the branch was created).
 cat > "$tmp/wt-fail.sh" <<'WRAP'
 #!/usr/bin/env bash
 n="$(cat "$COUNT" 2>/dev/null || echo 0)"; n=$((n + 1)); echo "$n" > "$COUNT"
 if [ "$1" = new ] && [ "$n" -ge 2 ]; then
   [ "$FAIL_MODE" != before ] || { echo "injected failure" >&2; exit 1; }
+  [ "$FAIL_MODE" != branchonly ] || { git branch "$2/$3" "$BASE_REF"; echo "injected failure after creating the branch" >&2; exit 1; }
   out="$(bash "$REAL_WT" "$@")" || exit 1
   [ "$FAIL_MODE" != dirty ] || touch "$(printf '%s\n' "$out" | sed -n 's/^worktree=//p')/dirty"
   echo "injected failure after creating" >&2; exit 1
@@ -160,7 +162,7 @@ exec bash "$REAL_WT" "$@"
 WRAP
 failing() { # $1 = FAIL_MODE, rest = bulk.sh args (gate off)
   local mode="$1"; shift; rm -f "$tmp/count"
-  ( export DEVFLOW_WT_SH="$tmp/wt-fail.sh" COUNT="$tmp/count" FAIL_MODE="$mode" REAL_WT="$ROOT/scripts/wt.sh"; run off "$@" )
+  ( export DEVFLOW_WT_SH="$tmp/wt-fail.sh" COUNT="$tmp/count" FAIL_MODE="$mode" REAL_WT="$ROOT/scripts/wt.sh" BASE_REF=origin/main; run off "$@" )
 }
 expect 1 "a failure on the second change fails the run" failing before new alpha beta --no-fetch
 check "...printing no JSON" test ! -s "$tmp/out"
@@ -181,6 +183,18 @@ saw 0 "...with the branch" "(feat/beta)" "$tmp/err"
 check "...removing the clean first worktree" test ! -e "$tmp/wts/feat-alpha"
 rm -f "$tmp/wts/feat-beta/dirty"; git worktree remove "$tmp/wts/feat-beta"; git branch -q -D feat/beta
 check "...and nothing else is left once cleaned" nothing_created
+
+expect 1 "a branch created without a worktree is cleaned up too" failing branchonly new alpha beta --no-fetch
+saw 0 "...claiming success only because nothing remains" "everything created before it was removed" "$tmp/err"
+check "...leaving no branch" test -z "$(git branch --list 'feat/alpha' 'feat/beta')"
+check "...and only the main worktree" nothing_created
+mkdir -p "$tmp/realroot"; ln -s "$tmp/realroot" "$tmp/linkroot"
+( export DEVFLOW_WORKTREE_ROOT="$tmp/linkroot/wts"; failing after new alpha beta --no-fetch ); r=$?
+check "a worktree folder behind a symbolic link is rolled back (exit 1)" test "$r" = 1
+saw 0 "...claiming success only because nothing remains" "everything created before it was removed" "$tmp/err"
+check "...leaving no worktree behind" test "$(git worktree list | wc -l | tr -d ' ')" = 1
+check "...and no branch" test -z "$(git branch --list 'feat/alpha' 'feat/beta')"
+check "...and no directory in the real folder" test -z "$(ls "$tmp/realroot/wts" 2>/dev/null)"
 
 echo "== new: success with an issue"
 expect 0 "two eligible changes get a worktree each" run off new alpha:42 beta --no-fetch
@@ -239,6 +253,17 @@ ctl="$tmp/c"$'\001'"x"
 check "a root with only a control character is accepted" test "$r" = 0
 valid_json "...and the output is valid JSON" "$tmp/out"
 saw 0 "...with the control character escaped" 'c\u0001x/docs-alpha'
+
+for c in alpha beta; do git worktree remove "$ctl/docs-$c"; done; git branch -q -D docs/alpha docs/beta
+hi="$tmp/caf"$'\303\251'
+( export LC_ALL=C DEVFLOW_WORKTREE_ROOT="$hi"; run off new alpha beta --type test --no-fetch ); r=$?
+check "a root with a non-ASCII character is accepted in the C locale" test "$r" = 0
+valid_json "...and the output is valid JSON" "$tmp/out"
+saw 0 "...keeping the character as it is" "caf"$'\303\251'"/test-alpha"
+
+echo "== help"
+expect 0 "--help succeeds" run off --help
+saw 0 "...and keeps the guarantee that nothing is published" "never pushes, merges, archives, comments or opens pull requests"
 
 echo "== the helper never publishes"
 if grep -nE 'git push|git merge|gh pr|gh api|openspec archive' "$BULK" >"$tmp/out"; then echo "  FAIL  bulk.sh contains publishing commands"; cat "$tmp/out"; fail=1; else echo "  ok    no push, merge, PR or archive commands in bulk.sh"; fi
