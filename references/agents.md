@@ -44,7 +44,9 @@ When done, reply with: commits created, tests run and their result, open questio
 The pattern above splits the tasks of one change. To apply several independent, approved changes at once, use one worktree and one `devflow-implementer` per **change** (SKILL.md, "Bulk apply"): `scripts/bulk.sh list` to see what is eligible, `bulk.sh new <change>…` for the worktrees and `bulk.sh prompt <change> --worktree <path>` for each worker's prompt. Differences with task-level parallelism:
 
 - Each worker owns the `tasks.md` of its own change (nobody else touches that worktree) and keeps its own branch and PR.
-- Each worker applies and then verifies before it reports; the prompt requires it.
+- Each worker applies and then verifies before it reports; the prompt requires it and spells out the completeness, correctness and coherence checks, so it does not depend on the skill being present in the worktree.
+- Give each change its issue (`bulk.sh new <change>:<issue> …`) so the branch name, the `Refs:` trailer and the PR link keep working.
+- Creation is all or nothing: refusals (duplicates, existing branches or worktrees under any naming, ineligible changes) create nothing, and a failure midway removes what the run created.
 - Nothing is pushed, merged or archived; the orchestrator asks the user first.
 
 Report every worker must return, and the orchestrator shows consolidated, one block per change:

@@ -6,6 +6,7 @@ Notable changes to spec-devflow. The version lives in the `SKILL.md` frontmatter
 
 ### Added
 - Bulk apply (opt-in): apply several approved changes in parallel, one isolated worktree, one `devflow-implementer` and one PR per change. Every worker applies and then verifies before reporting, a consolidated report is produced per change, and the run never pushes, merges, archives or opens PRs without the user's approval. With the proposal gate on, only changes whose proposal is on the default branch are eligible.
+- Bulk apply is all or nothing and strict about existing work: duplicate ids and any existing branch (local or on `origin`, any type, with or without an issue number) or worktree are refused before anything is created, and a failure midway removes what was created. `<change>:<issue>` carries the issue number into the branch and the worker prompt. All JSON output is valid for any ref, path or name, and directories that are not valid change ids are skipped with a warning.
 - `scripts/bulk.sh` (`list`, `new`, `prompt`) and its regression suite `tests/bulk.sh`; "Bulk apply" section in `SKILL.md` and the report template in `references/agents.md`.
 - `SKILL.md`: "What to say when a gate blocks" (reference wording for apply and archive blocks) and a "Red flags" section listing the git-state situations in which the agent must pause and ask.
 - `SKILL.md` step 3: ask whether to commit completed artifacts before creating the next one when building them one at a time, in both modes.
