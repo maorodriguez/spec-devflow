@@ -109,7 +109,7 @@ NON_ENGLISH_RE='(á|é|í|ó|ú|Á|É|Í|Ó|Ú|ñ|Ñ|ü|Ü|¿|¡|à|è|ì|ò|ù|
 # ---------- repo configuration ----------
 # Optional committed file at the repo root: .spec-devflow.conf (KEY=value lines, no shell evaluation).
 # Environment variables override it. Only whitelisted keys are read.
-DEVFLOW_CONF_KEYS="DEVFLOW_ARCHIVE_TIMING DEVFLOW_MERGE_STRATEGY DEVFLOW_AUTO_MERGE DEVFLOW_TEST_CMD DEVFLOW_WORKTREE_ROOT DEVFLOW_DEFAULT_BRANCH
+DEVFLOW_CONF_KEYS="DEVFLOW_ARCHIVE_TIMING DEVFLOW_PROPOSAL_GATE DEVFLOW_MERGE_STRATEGY DEVFLOW_AUTO_MERGE DEVFLOW_TEST_CMD DEVFLOW_WORKTREE_ROOT DEVFLOW_DEFAULT_BRANCH
  DEVFLOW_REQUIRE_AGENT_REVIEW
  DEVFLOW_CLAUDE_MODEL_PLAN DEVFLOW_CLAUDE_MODEL_APPLY DEVFLOW_CLAUDE_MODEL_TASK DEVFLOW_CLAUDE_MODEL_REVIEW
  DEVFLOW_OPENCODE_MODEL_PLAN DEVFLOW_OPENCODE_MODEL_APPLY DEVFLOW_OPENCODE_MODEL_TASK DEVFLOW_OPENCODE_MODEL_REVIEW"
@@ -148,3 +148,20 @@ phase_model() {
 
 # Where shared review records live (visible from every worktree of the repo).
 review_dir() { printf '%s/devflow/reviews' "$(cd "$(git rev-parse --git-common-dir)" && pwd -P)"; }
+
+# ---------- proposal gate (two-PR mode) ----------
+# DEVFLOW_PROPOSAL_GATE=main: the proposal must reach the default branch before apply starts, and the change
+# is archived from a worktree on top of the default branch after the implementation PR is merged.
+# Default (off): one PR per change carries proposal, implementation and archive.
+proposal_gate_on() { [ "${DEVFLOW_PROPOSAL_GATE:-off}" = main ]; }
+# Is <change> an active (not archived) change at <ref>?
+change_active_on() { git cat-file -e "$1:openspec/changes/$2/proposal.md" 2>/dev/null; }
+# Is <change> archived at <ref>?
+change_archived_on() {
+  git ls-tree -d --name-only "$1" "openspec/changes/archive/" 2>/dev/null | grep -Eq "/[0-9]{4}-[0-9]{2}-[0-9]{2}-$2\$"
+}
+# Remote-tracking default branch when it exists, else the local one.
+default_ref() {
+  local def; def="$(default_branch)"
+  if git rev-parse --verify --quiet "origin/$def" >/dev/null; then echo "origin/$def"; else echo "$def"; fi
+}

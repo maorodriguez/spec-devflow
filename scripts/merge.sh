@@ -9,6 +9,7 @@
 # Checks: PR open and not draft; approved by someone other than the author; checks not failing;
 # the OpenSpec change is archived on the PR head (unless --no-change); a recorded agent code review
 # covers the PR head with 0 CRITICAL (unless DEVFLOW_REQUIRE_AGENT_REVIEW=0); English merge subject.
+# With DEVFLOW_PROPOSAL_GATE=main the archive check is replaced by the two-PR checks (proposal / implementation / archive PR).
 # Uses --match-head-commit so GitHub refuses the merge if the head moved after these checks.
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -78,6 +79,20 @@ if [ "$nochange" = 1 ]; then
   note "no OpenSpec change expected (--no-change)"
 elif [ -z "$change" ]; then
   bad "PR body has no 'OpenSpec-Change:' line (use --no-change for fixes without a change)"
+elif proposal_gate_on; then
+  # Two-PR mode: the PR is a proposal PR, an implementation PR (change active) or the archive PR (archived).
+  git fetch --quiet origin "$base" 2>/dev/null || true
+  base_ref="origin/$base"; git rev-parse --verify --quiet "$base_ref" >/dev/null || base_ref="$base"
+  if change_active_on "$head_oid" "$change"; then
+    if change_active_on "$base_ref" "$change"; then ok "implementation PR: proposal '$change' is already on $base_ref"
+    else ok "proposal PR: '$change' is not on $base_ref yet"; fi
+    note "archive it afterwards in its own PR (proposal-gate.sh $change --stage archive)"
+  elif change_archived_on "$head_oid" "$change"; then
+    if change_active_on "$base_ref" "$change"; then ok "archive PR: '$change' is active on $base_ref and archived on the PR head"
+    else bad "change '$change' is not active on $base_ref; nothing to archive (implementation not merged?)"; fi
+  else
+    bad "change '$change' not found on the PR head"
+  fi
 else
   if git cat-file -e "$head_oid:openspec/changes/$change/proposal.md" 2>/dev/null; then
     bad "change '$change' is not archived on the PR head (openspec archive $change --yes, commit, push)"

@@ -8,6 +8,8 @@
 #   The change must be active if DEVFLOW_ARCHIVE_TIMING resolves to after-approval,
 #   and already archived if it resolves to before-review.
 # --stage merge: before merging. The change must be archived.
+# With DEVFLOW_PROPOSAL_GATE=main (two-PR mode) the change must stay active in both stages: the archive
+# goes in its own PR after the implementation is merged (see proposal-gate.sh).
 # Both stages require a recorded agent code review covering HEAD with 0 CRITICAL findings
 # (DEVFLOW_REQUIRE_AGENT_REVIEW=0 disables it).
 #
@@ -46,6 +48,12 @@ if [ -n "$change" ]; then
   timing="$(bash "$SCRIPT_DIR/repo-policy.sh" --get archive_timing 2>/dev/null)"
   case "$timing" in before-review|after-approval) ;; *) timing="${DEVFLOW_ARCHIVE_TIMING:-after-approval}"; [ "$timing" = auto ] && timing=after-approval;; esac
   if [ "$stage" = merge ] || [ "$timing" = before-review ]; then expect=archived; else expect=active; fi
+  # Proposal gate (two-PR mode): the PR never carries the archive; the change is archived after the merge.
+  proposal_pr=0
+  if proposal_gate_on; then
+    expect=active; timing="proposal-gate"
+    if change_active_on "$(default_ref)" "$change"; then :; else proposal_pr=1; fi
+  fi
   echo "== openspec ($change) — stage=$stage, archive timing=$timing, expected: $expect"
   dir="$top/openspec/changes/$change"
   archived_dir="$(find "$top/openspec/changes/archive" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | grep -E "/[0-9]{4}-[0-9]{2}-[0-9]{2}-$change\$" | sort | tail -n1)"
@@ -58,13 +66,17 @@ if [ -n "$change" ]; then
     if [ -f "$dir/tasks.md" ]; then
       open="$(grep -Ec '^[[:space:]]*[-*][[:space:]]+\[[[:space:]]\]' "$dir/tasks.md" || true)"
       done_="$(grep -Eic '^[[:space:]]*[-*][[:space:]]+\[x\]' "$dir/tasks.md" || true)"
-      if [ "${open:-0}" = 0 ]; then ok "tasks.md: $done_ done, 0 pending"; else bad "tasks.md: ${open} pending task(s)"; fi
+      if [ "${open:-0}" = 0 ]; then ok "tasks.md: $done_ done, 0 pending"
+      elif [ "$proposal_pr" = 1 ]; then note "tasks.md: ${open} pending task(s) (proposal PR: the proposal is not on $(default_ref) yet)"
+      else bad "tasks.md: ${open} pending task(s)"; fi
     else note "no tasks.md"; fi
     if grep -Eq '#[0-9]+' "$dir/proposal.md" 2>/dev/null; then ok "proposal.md references an issue"; else note "proposal.md does not reference an issue (#N)"; fi
     ne_files="$(grep -rlE "$NON_ENGLISH_RE" "$dir" 2>/dev/null | sed "s#^$top/##" | paste -sd' ' -)"
     if [ -z "$ne_files" ]; then ok "change artifacts look English"; else note "possible non-English text in: $ne_files (proper names are fine)"; fi
   elif [ -n "$archived_dir" ]; then
-    if [ "$expect" = archived ]; then ok "change archived: ${archived_dir#"$top"/}"; else bad "change is already archived but archive timing is after-approval (archive only after the PR is approved)"; fi
+    if [ "$expect" = archived ]; then ok "change archived: ${archived_dir#"$top"/}"
+    elif [ "$timing" = proposal-gate ]; then bad "change is archived in this PR, but with the proposal gate the archive goes in its own PR after the implementation is merged (proposal-gate.sh --stage archive)"
+    else bad "change is already archived but archive timing is after-approval (archive only after the PR is approved)"; fi
     if command -v openspec >/dev/null 2>&1; then
       if out="$(cd "$top" && openspec validate --specs --strict --no-interactive 2>&1)"; then ok "openspec validate --specs --strict"
       else bad "openspec validate --specs --strict:"; printf '%s\n' "$out" | sed 's/^/        /'; fi

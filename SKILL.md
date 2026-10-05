@@ -131,6 +131,7 @@ If review asks for changes to the proposal, delegate to `devflow-planner` again 
 
 ## 4. Apply (implementation)
 
+0. If the proposal gate is on (`DEVFLOW_PROPOSAL_GATE=main`, see "Proposal gate"), run `bash <skill-dir>/scripts/proposal-gate.sh <change-id> --stage apply` first. If it blocks, do not apply: the proposal must reach the default branch first.
 1. Delegate to `devflow-implementer` (apply model) in the change worktree, telling it that it owns `tasks.md`; it follows OpenSpec's `openspec-apply-change` skill. Inline fallback: `/opsx:apply <change-id>` (OpenCode: `/opsx-apply`). If the user asked for specific tasks, pass only those.
 2. Commit per logical group of tasks, including the updated `tasks.md`, through `commit.sh` (add `--task 2.1` for each task covered). Format in `references/github.md`.
 3. For fixes: write the failing test that reproduces the bug first and commit it with the fix.
@@ -143,6 +144,8 @@ If review asks for changes to the proposal, delegate to `devflow-planner` again 
 2. `bash <skill-dir>/scripts/preflight.sh <change-id>`: validation, pending tasks, clean tree, branch sync, commit authorship and attribution, English heuristics, and `DEVFLOW_TEST_CMD` when set.
 
 ## 6. Archive timing
+
+With the proposal gate on, this section and the archive in step 9 do not apply: the PR never carries the archive (see "Proposal gate").
 
 When the change gets archived depends on the repo, because archiving adds a commit:
 
@@ -197,6 +200,23 @@ Merging happens only through the PR, after it is published, reviewed by the agen
 
 `bash <skill-dir>/scripts/wt.sh remove <name-or-path>` for the change worktree and every review worktree. It refuses when there are uncommitted changes or unpushed commits. `--delete-branch` uses `git branch -d` (safe); with squash merges git won't consider the branch merged: confirm with `gh pr view <n> --json state` and let the user delete it with `-D`. Auto-merge doesn't delete the remote branch; the repo setting "Automatically delete head branches" does. In Orca you can also archive/delete from the UI; Orca notices worktrees removed by git.
 
+## Proposal gate (optional two-PR mode)
+
+Off by default: one PR carries proposal, implementation and archive. Set `DEVFLOW_PROPOSAL_GATE=main` (in `.spec-devflow.conf` or the environment) when the spec must be reviewed and merged on its own, so that every OpenSpec state change crosses the default branch before the next phase depends on it.
+
+| Phase | PR | Gate |
+|---|---|---|
+| Propose | PR 1: proposal artifacts only (steps 2–3) | The human reviews it; it is merged through `merge.sh` like any PR |
+| Apply | PR 2: implementation, `tasks.md` updated, change still active | `proposal-gate.sh <id> --stage apply` blocks unless the proposal is on the default branch and no proposal file is uncommitted. The worktree can be a branch, a worktree or the default branch's tip |
+| Archive | PR 3: only `openspec archive`, from a fresh worktree on the updated default branch | `proposal-gate.sh <id> --stage archive` blocks unless the implementation is merged (all tasks done on the default branch), the change is still active there and HEAD contains its tip |
+
+- Branch for PR 2 and PR 3: reuse the change id (`feat/<issue>-<change-id>`, `chore/<issue>-archive-<change-id>`); PR 1 and PR 2 may both say `Refs #<n>`, and only PR 2 says `Closes #<n>`.
+- `preflight.sh` keeps the change **active** in both stages (the PR never contains the archive) and `merge.sh` recognizes proposal, implementation and archive PRs; the agent code review (step 7) applies to PR 2.
+- If a gate blocks, say so with the script's message and ask the user to fix the git state; never work around it, and never treat worktree visibility as proof the proposal reached the default branch.
+- Archive in a worktree because the main checkout stays read-only for agents (rule 3).
+- When the user drives OpenSpec by hand (`/opsx:continue`), before creating the next artifact ask whether to commit the completed ones, or whether to continue without that checkpoint.
+- Commits made through `commit.sh` inside the flow are covered by the user starting it; creating branches or merging outside the flow, or a commit the user did not ask for, still needs their explicit say-so.
+
 ## Identity
 
 `scripts/identity.sh` decides who authors commits; `scripts/commit.sh` applies it. Details and setup in `references/identity.md`.
@@ -232,6 +252,7 @@ If the change's worktree exists, work there. Otherwise (another machine or agent
 - `references/github.md` — commit format, trailers, branch names, `gh` commands, issue ↔ change ↔ PR linking, merge policy and recommended branch protection. Read before the first commit, PR or merge of a session.
 - `references/worktrees.md` — worktree location per runtime, `.worktreeinclude`, dependencies, cleanup, troubleshooting.
 - `references/orca.md` — Orca CLI, detection, checkpoints, `orca.yaml`, dispatching agents. Read if `orca_available=yes`.
+- `scripts/proposal-gate.sh` — the two-PR gate checks (`--stage apply|archive`); `tests/proposal-gate.sh` is its regression suite.
 - `references/models.md` — models per phase, `.spec-devflow.conf` keys, generating and invoking the phase agents.
 - `references/code-review.md` — agent code review procedure, checklist, severities and exact report format. Read before step 7.
 - `references/agents.md` — delegating to sub-agents with one worktree per agent in Claude Code, OpenCode and Orca.

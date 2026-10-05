@@ -94,6 +94,7 @@ Optional: copy `assets/pr-template.md` to `.github/pull_request_template.md` so 
 ```ini
 # .spec-devflow.conf
 DEVFLOW_ARCHIVE_TIMING=auto        # auto | before-review | after-approval
+DEVFLOW_PROPOSAL_GATE=off          # off | main (two-PR mode, see SKILL.md "Proposal gate")
 DEVFLOW_MERGE_STRATEGY=squash      # squash | merge | rebase
 DEVFLOW_AUTO_MERGE=0               # 1 = merge.sh uses --auto by default
 DEVFLOW_TEST_CMD=pnpm test
@@ -116,6 +117,7 @@ DEVFLOW_CLAUDE_MODEL_REVIEW=opus
 | `DEVFLOW_DEFAULT_BRANCH` | Default branch when `origin/HEAD` isn't set |
 | `DEVFLOW_TEST_CMD` | Test command run by `preflight.sh` |
 | `DEVFLOW_ARCHIVE_TIMING` | `auto` (default), `before-review` or `after-approval` |
+| `DEVFLOW_PROPOSAL_GATE` | `off` (default) or `main`: proposal and implementation merge through separate PRs and the archive runs after the merge |
 | `DEVFLOW_MERGE_STRATEGY` | `squash` (default), `merge` or `rebase` |
 | `DEVFLOW_AUTO_MERGE` | `1` to make `merge.sh` enable auto-merge by default |
 | `DEVFLOW_REQUIRE_AGENT_REVIEW` | `0` disables the agent code review gate (default `1`) |
