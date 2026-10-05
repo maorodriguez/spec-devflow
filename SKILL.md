@@ -127,6 +127,8 @@ Inside the worktree:
 5. With confirmation: `git push -u origin <branch>` and open a **draft PR** from `assets/pr-template.md` (`gh pr create --draft …`), body with `Closes #<n>`.
 6. **Human gate**: ask the user to review the proposal (in the PR or in Orca) before implementing. Changing the spec is cheap now and expensive later.
 
+When the artifacts are built one at a time instead of in one go (`/opsx:continue`), before creating the next artifact ask the user whether to commit the ones already completed, or whether to continue without that checkpoint.
+
 If review asks for changes to the proposal, delegate to `devflow-planner` again (it uses `openspec-update-change`; inline: `/opsx:update`), validate, and commit again.
 
 ## 4. Apply (implementation)
@@ -159,7 +161,7 @@ bash <skill-dir>/scripts/repo-policy.sh --get archive_timing   # before-review |
 **before-review**: archive now, before the agent code review, so both reviews see the final spec diff.
 
 1. `openspec archive <change-id> --yes`; for any *new* capability, replace the `TBD` `## Purpose` in `openspec/specs/<capability>/spec.md` with a real one (≥ 50 characters, English), or strict validation fails.
-2. `commit.sh -m "docs(openspec): archive <change-id>" --issue <n> --change <change-id>`, push with confirmation.
+2. `commit.sh -m "docs(openspec): archive <change-id>" --issue <n> --change <change-id>` (the archive and the spec sync are committed, never left in the tree), push with confirmation.
 3. If review later asks for spec changes: `git revert --no-commit <archive-commit>` then `commit.sh -m "revert(openspec): reopen <change-id> for review changes" …`. That restores the change folder and the previous specs; update with `devflow-planner`, validate, and archive again (steps 1–2).
 
 **after-approval**: keep the change active now; archive in step 9.
@@ -215,8 +217,26 @@ Off by default: one PR carries proposal, implementation and archive. Set `DEVFLO
 - Branch names: `feat/<issue>-<change-id>` for PR 1 and PR 2 (a new worktree each, built from the updated default branch) and `chore/<issue>-archive-<change-id>` for PR 3; only PR 2 says `Closes #<n>`, the others say `Refs #<n>`.
 - If a gate blocks, say so with the script's message and ask the user to fix the git state; never work around it, and never treat worktree visibility as proof the proposal reached the default branch.
 - Archive in a worktree because the main checkout stays read-only for agents (rule 3).
-- When the user drives OpenSpec by hand (`/opsx:continue`), before creating the next artifact ask whether to commit the completed ones, or whether to continue without that checkpoint.
 - Commits made through `commit.sh` inside the flow are covered by the user starting it; creating branches or merging outside the flow, or a commit the user did not ask for, still needs their explicit say-so.
+
+### What to say when a gate blocks
+
+Stop, say it in the user's language, and ask them to make the git state explicit. The English wording below is the reference:
+
+- **Apply before the proposal reached the default branch**: "I should not apply this yet because the proposal change has not reached the default branch. A proposal can be drafted on a branch, but apply must start only after that proposal state is available there. Please merge the proposal PR first; then I can apply from a branch or a worktree."
+- **Archive before the implementation is merged**: "I should not archive this yet because the archive must start from the updated default branch after the implementation is merged. Verify makes a change eligible to merge; it does not replace the merge."
+
+## Red flags
+
+Whatever the mode, these mean: pause, explain the boundary, and ask the user to decide.
+
+- Applying a proposal that exists only on the current branch or worktree (gate on).
+- Treating worktree visibility as proof that the proposal reached the default branch.
+- Creating the next artifact in `/opsx:continue` without asking about committing the previous one.
+- Archiving before the implementation is merged, or from a branch that is not built on the updated default branch (gate on); archiving before the PR is approved (gate off).
+- Working on a proposal or archive from the main checkout instead of a worktree.
+- Committing, branching, pushing or merging outside this flow, or auto-merging, without the user's explicit say-so.
+- Leaving the archive and spec-sync changes uncommitted at the end of the flow.
 
 ## Identity
 

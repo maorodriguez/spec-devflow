@@ -2,6 +2,12 @@
 
 Notable changes to spec-devflow. The version lives in the `SKILL.md` frontmatter.
 
+## Unreleased
+
+### Added
+- `SKILL.md`: "What to say when a gate blocks" (reference wording for apply and archive blocks) and a "Red flags" section listing the git-state situations in which the agent must pause and ask.
+- `SKILL.md` step 3: ask whether to commit completed artifacts before creating the next one when building them one at a time, in both modes.
+
 ## 0.6.1
 
 ### Fixed
