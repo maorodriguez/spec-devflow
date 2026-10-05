@@ -59,6 +59,7 @@ gate() { DEVFLOW_PROPOSAL_GATE=main DEVFLOW_DEFAULT_BRANCH=main bash "$GATE" "$@
 pre() { PATH="$tmp/stubs:$PATH" DEVFLOW_REQUIRE_AGENT_REVIEW=0 DEVFLOW_DEFAULT_BRANCH=main DEVFLOW_PROPOSAL_GATE="$1" bash "$PREFLIGHT" demo --stage ready; }
 mrg() { ( cd "$1" && GH_HEAD_OID="$(git rev-parse HEAD)" GH_HEAD_REF="$(git rev-parse --abbrev-ref HEAD)" PATH="$tmp/stubs:$PATH" DEVFLOW_REQUIRE_AGENT_REVIEW=0 DEVFLOW_DEFAULT_BRANCH=main DEVFLOW_PROPOSAL_GATE="${2:-main}" bash "$ROOT/scripts/merge.sh" 7 ); }
 kind() { ( . "$LIB"; classify_change_pr origin/main HEAD demo ); }
+scope_base() { ( . "$LIB"; pr_scope_check "$1" "$2" HEAD demo ); } # $1 = kind, $2 = base ref
 scope() { ( . "$LIB"; pr_scope_check "$1" origin/main HEAD demo ); }
 newwt() { git fetch -q origin; git worktree add -q --no-track -b "$1" "$tmp/$1" origin/main; } # worktree from the updated main
 commit() { git add -A && git commit -q -m "$1"; }
@@ -99,7 +100,8 @@ git fetch -q origin
 expect 1 "an archive PR while main still has pending tasks is blocked" scope archive
 saw 0 "...saying the implementation is not merged" "implementation is not merged"
 expect 1 "merge.sh (dry run) blocks it too" mrg "$tmp/pS"
-saw 0 "...with the reason" "MERGE BLOCKED"
+saw 0 "...with the verdict" "MERGE BLOCKED"
+saw 0 "...and the reason" "implementation is not merged"
 
 echo "== PR 2: implementation"
 cd "$tmp/repo" && newwt pB && cd "$tmp/pB" || exit 1
@@ -121,6 +123,13 @@ git fetch -q origin
 expect 1 "an implementation PR with pending tasks is blocked" scope implementation
 echo '- [x] 1.1 do it' > openspec/changes/demo/tasks.md; commit "feat: finish the implementation"
 expect 0 "a finished implementation PR fits" scope implementation
+expect 1 "an implementation PR against a base ref that does not exist cannot be compared" scope_base implementation no-such-ref
+saw 0 "...reporting a comparison failure" "cannot diff no-such-ref...HEAD"
+saw 1 "...without claiming the proposal changed" "changes the approved proposal"
+git rm -q openspec/changes/demo/tasks.md; commit "feat: drop the task list"
+expect 1 "an implementation PR that deletes tasks.md is blocked" scope implementation
+saw 0 "...saying tasks.md is missing" "no openspec/changes/demo/tasks.md"
+git reset -q --hard HEAD~1
 echo "rewritten" >> openspec/changes/demo/proposal.md; commit "feat: also rewrite the approved spec"
 expect 1 "an implementation PR that edits the approved proposal is blocked" scope implementation
 saw 0 "...explaining why" "changes the approved proposal"
@@ -145,6 +154,9 @@ expect 0 "archive from a fresh worktree after the merge passes" gate demo --stag
 mkdir -p openspec/changes/archive; git mv openspec/changes/demo openspec/changes/archive/2026-01-01-demo; commit "docs: archive demo"
 [ "$(kind)" = archive ] && echo "  ok    classified as archive" || { echo "  FAIL  classified as $(kind), expected archive"; fail=1; }
 expect 0 "an archive-only diff fits" scope archive
+cd "$tmp/repo" && git worktree add -q --no-track -b pN "$tmp/pN" origin/main && ( cd "$tmp/pN" && git rm -q openspec/changes/demo/tasks.md && commit "docs: base without a task list" ); cd "$tmp/pC" || exit 1
+expect 1 "an archive PR whose base has no tasks.md is blocked" scope_base archive pN
+saw 0 "...saying the implementation cannot be verified" "cannot be verified as merged"
 ( cd "$tmp/pC/src" && [ "$(kind)" = archive ] ) && echo "  ok    classification also works from a subdirectory" || { echo "  FAIL  classification from a subdirectory"; fail=1; }
 expect 0 "merge.sh (dry run) accepts the archive PR" mrg "$tmp/pC"
 saw 0 "...as an archive PR" "archive PR for 'demo'"

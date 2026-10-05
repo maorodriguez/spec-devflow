@@ -2,6 +2,13 @@
 
 Notable changes to spec-devflow. The version lives in the `SKILL.md` frontmatter.
 
+## 0.6.1
+
+### Fixed
+- Proposal gate: an implementation PR that deletes `tasks.md`, or an archive PR whose base has no `tasks.md`, is now blocked instead of counting as "no pending tasks".
+- Proposal gate: when the proposal comparison itself fails (unknown ref, no merge base) the check reports "cannot diff <base>...<head>" instead of claiming the proposal changed.
+- `tests/proposal-gate.sh`: the `merge.sh` dry-run test asserts the reason for the block, and new cases cover a deleted `tasks.md`, a base without `tasks.md` and an unknown base ref.
+
 ## 0.6.0
 
 ### Added
@@ -15,5 +22,4 @@ Notable changes to spec-devflow. The version lives in the `SKILL.md` frontmatter
 Unchanged: one PR carries proposal, implementation and archive.
 
 ### Known gaps
-- Deleting `tasks.md` in an implementation PR, or having it missing on the base for an archive PR, still counts as "no pending tasks" (found in the last agent review, not fixed yet).
 - `merge.sh` with the gate on has only been exercised in dry runs against a stubbed `gh`.
