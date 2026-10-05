@@ -17,7 +17,7 @@ Commits  feat(ui): ...   + trailers Refs: #42 / OpenSpec-Change: add-dark-mode /
    │
 PR  "feat: add dark mode (#42)"  ──  Closes #42
    │
-openspec/changes/archive/YYYY-MM-DD-add-dark-mode/   (archived inside the PR)
+openspec/changes/archive/YYYY-MM-DD-add-dark-mode/   (archived inside the PR; with the proposal gate, in its own PR after the merge)
 ```
 
 The `change-id` is the shared key: issue, branch, change folder, trailers and PR all carry it, so any agent can rebuild the context with `scripts/link.sh`, `git log --grep` or `openspec show`.
@@ -79,7 +79,7 @@ Typical commits in the cycle:
 | Proposal | `docs(openspec): propose add-dark-mode` |
 | Proposal updates | `docs(openspec): update add-dark-mode design` |
 | Implementation | `feat(ui): ...`, `fix(auth): ...`, `test(ui): ...` (includes the updated `tasks.md`) |
-| Archive | `docs(openspec): archive add-dark-mode` |
+| Archive | `docs(openspec): archive add-dark-mode` (with the proposal gate: the only commit of the archive PR, branch `chore/<issue>-archive-add-dark-mode`) |
 
 Never rewrite published history without asking (`push --force-with-lease` only with confirmation).
 
@@ -103,6 +103,8 @@ gh pr review 57 --comment --body-file /tmp/review.md      # or --request-changes
 ## Merging
 
 Order: PR published → ready for review → approved by someone other than the author → change archived (timing in SKILL.md step 6) → CI green and branch up to date → merge through GitHub. Never merge locally into the default branch and push.
+
+With `DEVFLOW_PROPOSAL_GATE=main` (two-PR mode, SKILL.md "Proposal gate") the change travels in three PRs, each merged through `merge.sh`: proposal, implementation (`Closes #<n>`) and archive. The archive step moves out of the implementation PR, and `merge.sh` classifies each PR and checks that its content fits. Every one of them needs its own recorded agent code review.
 
 Use `scripts/merge.sh`, never a bare `gh pr merge`:
 
