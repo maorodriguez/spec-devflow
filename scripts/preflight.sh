@@ -8,8 +8,8 @@
 #   The change must be active if DEVFLOW_ARCHIVE_TIMING resolves to after-approval,
 #   and already archived if it resolves to before-review.
 # --stage merge: before merging. The change must be archived.
-# With DEVFLOW_PROPOSAL_GATE=main (two-PR mode) the change must stay active in both stages: the archive
-# goes in its own PR after the implementation is merged (see proposal-gate.sh).
+# With DEVFLOW_PROPOSAL_GATE=main (two-PR mode) the PR is classified as proposal, implementation or archive
+# (see proposal-gate.sh) and its content must fit that kind; the archive is only expected in the archive PR.
 # Both stages require a recorded agent code review covering HEAD with 0 CRITICAL findings
 # (DEVFLOW_REQUIRE_AGENT_REVIEW=0 disables it).
 #
@@ -48,11 +48,15 @@ if [ -n "$change" ]; then
   timing="$(bash "$SCRIPT_DIR/repo-policy.sh" --get archive_timing 2>/dev/null)"
   case "$timing" in before-review|after-approval) ;; *) timing="${DEVFLOW_ARCHIVE_TIMING:-after-approval}"; [ "$timing" = auto ] && timing=after-approval;; esac
   if [ "$stage" = merge ] || [ "$timing" = before-review ]; then expect=archived; else expect=active; fi
-  # Proposal gate (two-PR mode): the PR never carries the archive; the change is archived after the merge.
-  proposal_pr=0
+  # Proposal gate (two-PR mode): a PR is a proposal, an implementation or an archive PR, depending on
+  # where the change stands on the default branch; only the archive PR contains the archived change.
+  pr_kind="" proposal_pr=0
   if proposal_gate_on; then
-    expect=active; timing="proposal-gate"
-    if change_active_on "$(default_ref)" "$change"; then :; else proposal_pr=1; fi
+    timing="proposal-gate"
+    if has_remote; then git fetch --quiet origin "$def" 2>/dev/null || true; fi
+    pr_kind="$(classify_change_pr "$(default_ref)" HEAD "$change")"
+    if [ "$pr_kind" = archive ]; then expect=archived; else expect=active; fi
+    [ "$pr_kind" != proposal ] || proposal_pr=1
   fi
   echo "== openspec ($change) — stage=$stage, archive timing=$timing, expected: $expect"
   dir="$top/openspec/changes/$change"
@@ -75,7 +79,7 @@ if [ -n "$change" ]; then
     if [ -z "$ne_files" ]; then ok "change artifacts look English"; else note "possible non-English text in: $ne_files (proper names are fine)"; fi
   elif [ -n "$archived_dir" ]; then
     if [ "$expect" = archived ]; then ok "change archived: ${archived_dir#"$top"/}"
-    elif [ "$timing" = proposal-gate ]; then bad "change is archived in this PR, but with the proposal gate the archive goes in its own PR after the implementation is merged (proposal-gate.sh --stage archive)"
+    elif [ "$timing" = proposal-gate ]; then bad "change is archived but its proposal is not active on $(default_ref); with the proposal gate the archive PR is built after the implementation is merged (proposal-gate.sh --stage archive)"
     else bad "change is already archived but archive timing is after-approval (archive only after the PR is approved)"; fi
     if command -v openspec >/dev/null 2>&1; then
       if out="$(cd "$top" && openspec validate --specs --strict --no-interactive 2>&1)"; then ok "openspec validate --specs --strict"
@@ -86,6 +90,11 @@ if [ -n "$change" ]; then
   else
     bad "openspec/changes/$change does not exist (active or archived)"
   fi
+fi
+
+if [ -n "$change" ] && [ -n "$pr_kind" ]; then
+  echo "== proposal gate"
+  if msg="$(pr_scope_check "$pr_kind" "$(default_ref)" HEAD "$change")"; then ok "$pr_kind PR: content fits ($(default_ref)...HEAD)"; else bad "$msg"; fi
 fi
 
 echo "== git"

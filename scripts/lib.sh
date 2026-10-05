@@ -156,12 +156,42 @@ review_dir() { printf '%s/devflow/reviews' "$(cd "$(git rev-parse --git-common-d
 proposal_gate_on() { [ "${DEVFLOW_PROPOSAL_GATE:-off}" = main ]; }
 # Is <change> an active (not archived) change at <ref>?
 change_active_on() { git cat-file -e "$1:openspec/changes/$2/proposal.md" 2>/dev/null; }
-# Is <change> archived at <ref>?
+# Is <change> archived at <ref>? (--full-tree: paths do not depend on the current directory)
 change_archived_on() {
-  git ls-tree -d --name-only "$1" "openspec/changes/archive/" 2>/dev/null | grep -Eq "/[0-9]{4}-[0-9]{2}-[0-9]{2}-$2\$"
+  git ls-tree --full-tree -d --name-only "$1" "openspec/changes/archive/" 2>/dev/null | grep -Eq "/[0-9]{4}-[0-9]{2}-[0-9]{2}-$2\$"
 }
 # Remote-tracking default branch when it exists, else the local one.
 default_ref() {
   local def; def="$(default_branch)"
   if git rev-parse --verify --quiet "origin/$def" >/dev/null; then echo "origin/$def"; else echo "$def"; fi
+}
+# Which of the three PRs of the two-PR mode is <head> relative to <base>? Prints proposal, implementation,
+# archive or unknown. Usage: classify_change_pr <base> <head> <change>
+classify_change_pr() {
+  if change_active_on "$2" "$3"; then
+    if change_active_on "$1" "$3"; then echo implementation; else echo proposal; fi
+  elif change_archived_on "$2" "$3" && change_active_on "$1" "$3"; then echo archive
+  else echo unknown; fi
+}
+# Does the content of <head> fit its kind? Silent and 0 when it does; prints the reason and returns 1 otherwise.
+# Usage: pr_scope_check <kind> <base> <head> <change>
+#   proposal:       the diff stays inside openspec/changes/<change>/
+#   implementation: tasks.md on <head> has no pending task
+#   archive:        the diff stays inside openspec/
+pr_scope_check() {
+  local kind="$1" base="$2" head="$3" change="$4" files outside open
+  case "$kind" in
+    proposal)
+      files="$(git diff --name-only "$base...$head" 2>/dev/null)" || { echo "cannot diff $base...$head"; return 1; }
+      outside="$(printf '%s\n' "$files" | grep -v '^$' | grep -v "^openspec/changes/$change/" | head -n3 | paste -sd' ' -)"
+      [ -z "$outside" ] || { echo "proposal PR touches files outside openspec/changes/$change/ (e.g. $outside); implementation goes in its own PR after the proposal is merged"; return 1; };;
+    implementation)
+      open="$(git show "$head:openspec/changes/$change/tasks.md" 2>/dev/null | grep -Ec '^[[:space:]]*[-*][[:space:]]+\[[[:space:]]\]' || true)"
+      [ "${open:-0}" = 0 ] || { echo "implementation PR has $open pending task(s) in tasks.md"; return 1; };;
+    archive)
+      files="$(git diff --name-only "$base...$head" 2>/dev/null)" || { echo "cannot diff $base...$head"; return 1; }
+      outside="$(printf '%s\n' "$files" | grep -v '^$' | grep -v '^openspec/' | head -n3 | paste -sd' ' -)"
+      [ -z "$outside" ] || { echo "archive PR touches files outside openspec/ (e.g. $outside)"; return 1; };;
+    *) echo "change '$change' is not in a recognizable state between $base and $head (not active on $head, or already archived on $base)"; return 1;;
+  esac
 }

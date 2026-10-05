@@ -80,18 +80,17 @@ if [ "$nochange" = 1 ]; then
 elif [ -z "$change" ]; then
   bad "PR body has no 'OpenSpec-Change:' line (use --no-change for fixes without a change)"
 elif proposal_gate_on; then
-  # Two-PR mode: the PR is a proposal PR, an implementation PR (change active) or the archive PR (archived).
+  # Two-PR mode: the PR is a proposal PR, an implementation PR or the archive PR, and its content must fit.
   git fetch --quiet origin "$base" 2>/dev/null || true
   base_ref="origin/$base"; git rev-parse --verify --quiet "$base_ref" >/dev/null || base_ref="$base"
-  if change_active_on "$head_oid" "$change"; then
-    if change_active_on "$base_ref" "$change"; then ok "implementation PR: proposal '$change' is already on $base_ref"
-    else ok "proposal PR: '$change' is not on $base_ref yet"; fi
-    note "archive it afterwards in its own PR (proposal-gate.sh $change --stage archive)"
-  elif change_archived_on "$head_oid" "$change"; then
-    if change_active_on "$base_ref" "$change"; then ok "archive PR: '$change' is active on $base_ref and archived on the PR head"
-    else bad "change '$change' is not active on $base_ref; nothing to archive (implementation not merged?)"; fi
+  if git cat-file -e "$head_oid^{commit}" 2>/dev/null; then
+    kind="$(classify_change_pr "$base_ref" "$head_oid" "$change")"
+    if msg="$(pr_scope_check "$kind" "$base_ref" "$head_oid" "$change")"; then
+      ok "$kind PR for '$change' ($base_ref...head)"
+      [ "$kind" = archive ] || note "archive it afterwards in its own PR (proposal-gate.sh $change --stage archive)"
+    else bad "$msg"; fi
   else
-    bad "change '$change' not found on the PR head"
+    bad "PR head not available locally; cannot classify the PR for the proposal gate"
   fi
 else
   if git cat-file -e "$head_oid:openspec/changes/$change/proposal.md" 2>/dev/null; then

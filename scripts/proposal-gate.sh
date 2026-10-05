@@ -35,16 +35,21 @@ if ! proposal_gate_on; then echo "proposal gate off (DEVFLOW_PROPOSAL_GATE=main 
 def="$(default_branch)"
 if [ "$fetch" = 1 ] && has_remote; then git fetch --quiet origin "$def" 2>/dev/null || note "could not fetch origin/$def; using the local ref"; fi
 ref="$(default_ref)"
-top="$(git rev-parse --show-toplevel)"
 
 echo "== proposal gate ($stage) for $change against $ref"
-dirty="$(git status --porcelain -- "openspec/changes/$change" | wc -l | tr -d ' ')"
+dirty="$(git status --porcelain -- ":(top)openspec/changes/$change" | wc -l | tr -d ' ')"
 
 case "$stage" in
   apply)
     if [ "$dirty" = 0 ]; then ok "no uncommitted files under openspec/changes/$change/"; else bad "$dirty uncommitted file(s) under openspec/changes/$change/; commit them first"; fi
     if change_active_on "$ref" "$change"; then
       ok "proposal is on $ref"
+      # The proposal in HEAD must be the merged one (tasks.md is excluded: apply ticks it).
+      if git diff --quiet "$ref" HEAD -- ":(top)openspec/changes/$change" ":(top,exclude)openspec/changes/$change/tasks.md"; then
+        ok "the proposal in HEAD matches $ref"
+      else
+        bad "the proposal in HEAD differs from $ref (excluding tasks.md); build the worktree from the updated $def so the implementation targets the approved spec"
+      fi
     elif change_archived_on "$ref" "$change"; then
       bad "change is already archived on $ref; nothing to apply"
     else
@@ -52,7 +57,8 @@ case "$stage" in
     fi;;
   archive)
     br="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
-    if [ -n "$br" ] && [ "$br" != "$def" ]; then ok "branch: $br (worktree on top of $def)"; else bad "archive from a worktree branch (not detached, not $def)"; fi
+    if in_linked_worktree; then ok "working in a linked worktree"; else bad "you are in the main checkout; archive from a worktree"; fi
+    if [ -n "$br" ] && [ "$br" != "$def" ]; then ok "branch: $br"; else bad "archive from a worktree branch (not detached, not $def)"; fi
     if [ "$dirty" = 0 ]; then ok "clean openspec/changes/$change/"; else bad "$dirty uncommitted file(s) under openspec/changes/$change/"; fi
     if git merge-base --is-ancestor "$ref" HEAD 2>/dev/null; then ok "HEAD contains $ref"; else bad "HEAD does not contain $ref; rebuild this worktree from the updated $def"; fi
     if change_active_on "$ref" "$change"; then

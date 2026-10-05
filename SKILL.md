@@ -207,11 +207,12 @@ Off by default: one PR carries proposal, implementation and archive. Set `DEVFLO
 | Phase | PR | Gate |
 |---|---|---|
 | Propose | PR 1: proposal artifacts only (steps 2–3) | The human reviews it; it is merged through `merge.sh` like any PR |
-| Apply | PR 2: implementation, `tasks.md` updated, change still active | `proposal-gate.sh <id> --stage apply` blocks unless the proposal is on the default branch and no proposal file is uncommitted. The worktree can be a branch, a worktree or the default branch's tip |
+| Apply | PR 2: implementation, `tasks.md` fully ticked, change still active | `proposal-gate.sh <id> --stage apply` blocks unless the proposal is on the default branch, HEAD carries that same proposal (`tasks.md` aside) and no proposal file is uncommitted |
 | Archive | PR 3: only `openspec archive`, from a fresh worktree on the updated default branch | `proposal-gate.sh <id> --stage archive` blocks unless the implementation is merged (all tasks done on the default branch), the change is still active there and HEAD contains its tip |
 
-- Branch for PR 2 and PR 3: reuse the change id (`feat/<issue>-<change-id>`, `chore/<issue>-archive-<change-id>`); PR 1 and PR 2 may both say `Refs #<n>`, and only PR 2 says `Closes #<n>`.
-- `preflight.sh` keeps the change **active** in both stages (the PR never contains the archive) and `merge.sh` recognizes proposal, implementation and archive PRs; the agent code review (step 7) applies to PR 2.
+- `preflight.sh` and `merge.sh` classify the PR from where the change stands on the default branch (proposal not there yet → proposal PR; active there → implementation PR; archived on the head but active there → archive PR) and check that its content fits: a proposal PR touches only `openspec/changes/<id>/`, an implementation PR has no pending task, an archive PR touches only `openspec/`. A PR that mixes phases is blocked.
+- Every PR still needs a recorded agent code review covering its head (step 7), including the proposal and archive PRs; `DEVFLOW_REQUIRE_AGENT_REVIEW=0` disables that gate for the repo.
+- Branch names: `feat/<issue>-<change-id>` for PR 1 and PR 2 (a new worktree each, built from the updated default branch) and `chore/<issue>-archive-<change-id>` for PR 3; only PR 2 says `Closes #<n>`, the others say `Refs #<n>`.
 - If a gate blocks, say so with the script's message and ask the user to fix the git state; never work around it, and never treat worktree visibility as proof the proposal reached the default branch.
 - Archive in a worktree because the main checkout stays read-only for agents (rule 3).
 - When the user drives OpenSpec by hand (`/opsx:continue`), before creating the next artifact ask whether to commit the completed ones, or whether to continue without that checkpoint.
