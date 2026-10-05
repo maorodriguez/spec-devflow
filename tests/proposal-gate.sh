@@ -154,9 +154,14 @@ expect 0 "archive from a fresh worktree after the merge passes" gate demo --stag
 mkdir -p openspec/changes/archive; git mv openspec/changes/demo openspec/changes/archive/2026-01-01-demo; commit "docs: archive demo"
 [ "$(kind)" = archive ] && echo "  ok    classified as archive" || { echo "  FAIL  classified as $(kind), expected archive"; fail=1; }
 expect 0 "an archive-only diff fits" scope archive
-cd "$tmp/repo" && git worktree add -q --no-track -b pN "$tmp/pN" origin/main && ( cd "$tmp/pN" && git rm -q openspec/changes/demo/tasks.md && commit "docs: base without a task list" ); cd "$tmp/pC" || exit 1
+cd "$tmp/repo" && git worktree add -q --no-track -b pN "$tmp/pN" origin/main || exit 1
+( cd "$tmp/pN" && git rm -q openspec/changes/demo/tasks.md && commit "docs: base without a task list" ) || exit 1
+cd "$tmp/pC" || exit 1
 expect 1 "an archive PR whose base has no tasks.md is blocked" scope_base archive pN
 saw 0 "...saying the implementation cannot be verified" "cannot be verified as merged"
+expect 1 "an archive PR against a base ref that does not exist cannot be compared" scope_base archive no-such-ref
+saw 0 "...reporting a comparison failure" "cannot diff no-such-ref...HEAD"
+saw 1 "...not blaming a missing tasks.md" "cannot be verified as merged"
 ( cd "$tmp/pC/src" && [ "$(kind)" = archive ] ) && echo "  ok    classification also works from a subdirectory" || { echo "  FAIL  classification from a subdirectory"; fail=1; }
 expect 0 "merge.sh (dry run) accepts the archive PR" mrg "$tmp/pC"
 saw 0 "...as an archive PR" "archive PR for 'demo'"

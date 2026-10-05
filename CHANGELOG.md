@@ -22,4 +22,5 @@ Notable changes to spec-devflow. The version lives in the `SKILL.md` frontmatter
 Unchanged: one PR carries proposal, implementation and archive.
 
 ### Known gaps
+- Deleting `tasks.md` in an implementation PR, or having it missing on the base for an archive PR, counted as "no pending tasks" (fixed in 0.6.1).
 - `merge.sh` with the gate on has only been exercised in dry runs against a stubbed `gh`.

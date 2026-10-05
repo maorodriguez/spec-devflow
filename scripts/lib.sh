@@ -187,9 +187,10 @@ pr_scope_check() {
       outside="$(printf '%s\n' "$files" | grep -v '^$' | grep -v "^openspec/changes/$change/" | head -n3 | paste -sd' ' -)"
       [ -z "$outside" ] || { echo "proposal PR touches files outside openspec/changes/$change/ (e.g. $outside); implementation goes in its own PR after the proposal is merged"; return 1; };;
     implementation)
+      git rev-parse --verify --quiet "$head^{commit}" >/dev/null || { echo "cannot diff $base...$head"; return 1; }
       git cat-file -e "$head:openspec/changes/$change/tasks.md" 2>/dev/null \
         || { echo "implementation PR has no openspec/changes/$change/tasks.md on its head, so its task list cannot be verified"; return 1; }
-      git diff --quiet "$base...$head" -- ":(top)openspec/changes/$change" ":(top,exclude)openspec/changes/$change/tasks.md"
+      git diff --quiet "$base...$head" -- ":(top)openspec/changes/$change" ":(top,exclude)openspec/changes/$change/tasks.md" 2>/dev/null
       case $? in   # 0: same, 1: differences, anything else: git could not compare
         0) ;;
         1) echo "implementation PR changes the approved proposal under openspec/changes/$change/ (tasks.md aside); spec changes go in a proposal PR"; return 1;;
@@ -198,6 +199,7 @@ pr_scope_check() {
       open="$(git show "$head:openspec/changes/$change/tasks.md" | grep -Ec '^[[:space:]]*[-*][[:space:]]+\[[[:space:]]\]' || true)"
       [ "${open:-0}" = 0 ] || { echo "implementation PR has $open pending task(s) in tasks.md"; return 1; };;
     archive)
+      git rev-parse --verify --quiet "$base^{commit}" >/dev/null || { echo "cannot diff $base...$head"; return 1; }
       git cat-file -e "$base:openspec/changes/$change/tasks.md" 2>/dev/null \
         || { echo "change '$change' has no tasks.md on $base, so the implementation cannot be verified as merged"; return 1; }
       open="$(git show "$base:openspec/changes/$change/tasks.md" | grep -Ec '^[[:space:]]*[-*][[:space:]]+\[[[:space:]]\]' || true)"
