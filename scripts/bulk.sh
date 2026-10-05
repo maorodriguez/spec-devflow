@@ -60,12 +60,9 @@ jstr() {
 # True when the argument is a non-empty string of digits only (newlines and anything else are rejected).
 is_digits() { case "$1" in ''|*[!0-9]*) return 1;; esac; return 0; }
 
-# Resolved (symlink-free) form of a path that may not exist yet: git prints resolved paths, so comparisons need it.
-real_path() {
-  local p="$1" d
-  if [ -d "$p" ]; then (cd "$p" && pwd -P); return; fi
-  d="$(dirname "$p")"
-  if [ -d "$d" ]; then printf '%s/%s\n' "$(cd "$d" && pwd -P)" "$(basename "$p")"; else printf '%s\n' "$p"; fi
+# Path of the worktree that has branch $1 checked out, as git reports it (empty when there is none).
+worktree_of_branch() {
+  git worktree list --porcelain | awk -v b="branch refs/heads/$1" '/^worktree / { p = substr($0, 10) } $0 == b { print p; exit }'
 }
 
 # Prints what already exists for a change the way the normal flow would find it: branches (local or origin,
@@ -200,8 +197,8 @@ cmd_new() {
     else
       # The failing creation may have left its own worktree and/or branch behind: include them in the rollback.
       # existing_work proved the branch did not exist before this run, so it is ours to clean up.
-      path="$(real_path "$root/$type-${i:+$i-}$c")"; branch="$type/${i:+$i-}$c"
-      if git worktree list --porcelain | grep -Fqx "worktree $path"; then
+      branch="$type/${i:+$i-}$c"; path="$(worktree_of_branch "$branch")"
+      if [ -n "$path" ]; then
         created_paths+=("$path"); created_branches+=("$branch")
       elif git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
         created_paths+=(""); created_branches+=("$branch")

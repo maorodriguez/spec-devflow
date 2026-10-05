@@ -255,11 +255,12 @@ valid_json "...and the output is valid JSON" "$tmp/out"
 saw 0 "...with the control character escaped" 'c\u0001x/docs-alpha'
 
 for c in alpha beta; do git worktree remove "$ctl/docs-$c"; done; git branch -q -D docs/alpha docs/beta
-hi="$tmp/caf"$'\303\251'
+hi="$tmp/c"$'\001'"af"$'\303\251'
 ( export LC_ALL=C DEVFLOW_WORKTREE_ROOT="$hi"; run off new alpha beta --type test --no-fetch ); r=$?
-check "a root with a non-ASCII character is accepted in the C locale" test "$r" = 0
+check "a root with a control character and non-ASCII bytes is accepted in the C locale" test "$r" = 0
 valid_json "...and the output is valid JSON" "$tmp/out"
-saw 0 "...keeping the character as it is" "caf"$'\303\251'"/test-alpha"
+saw 0 "...escaping the control character" 'c\u0001af'
+saw 0 "...and keeping the non-ASCII bytes as they are" $'\303\251'"/test-alpha"
 
 echo "== help"
 expect 0 "--help succeeds" run off --help
