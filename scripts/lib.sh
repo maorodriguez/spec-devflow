@@ -176,20 +176,25 @@ classify_change_pr() {
 # Does the content of <head> fit its kind? Silent and 0 when it does; prints the reason and returns 1 otherwise.
 # Usage: pr_scope_check <kind> <base> <head> <change>
 #   proposal:       the diff stays inside openspec/changes/<change>/
-#   implementation: tasks.md on <head> has no pending task
-#   archive:        the diff stays inside openspec/
+#   implementation: the approved proposal is untouched (tasks.md aside) and tasks.md has no pending task
+#   archive:        the implementation is merged (no pending task on <base>) and the diff stays inside openspec/
+# The diff runs with --no-renames so a file moved into the allowed area still shows up as a deletion outside it.
 pr_scope_check() {
   local kind="$1" base="$2" head="$3" change="$4" files outside open
   case "$kind" in
     proposal)
-      files="$(git diff --name-only "$base...$head" 2>/dev/null)" || { echo "cannot diff $base...$head"; return 1; }
+      files="$(git diff --no-renames --name-only "$base...$head" 2>/dev/null)" || { echo "cannot diff $base...$head"; return 1; }
       outside="$(printf '%s\n' "$files" | grep -v '^$' | grep -v "^openspec/changes/$change/" | head -n3 | paste -sd' ' -)"
       [ -z "$outside" ] || { echo "proposal PR touches files outside openspec/changes/$change/ (e.g. $outside); implementation goes in its own PR after the proposal is merged"; return 1; };;
     implementation)
+      git diff --quiet "$base...$head" -- ":(top)openspec/changes/$change" ":(top,exclude)openspec/changes/$change/tasks.md" \
+        || { echo "implementation PR changes the approved proposal under openspec/changes/$change/ (tasks.md aside); spec changes go in a proposal PR"; return 1; }
       open="$(git show "$head:openspec/changes/$change/tasks.md" 2>/dev/null | grep -Ec '^[[:space:]]*[-*][[:space:]]+\[[[:space:]]\]' || true)"
       [ "${open:-0}" = 0 ] || { echo "implementation PR has $open pending task(s) in tasks.md"; return 1; };;
     archive)
-      files="$(git diff --name-only "$base...$head" 2>/dev/null)" || { echo "cannot diff $base...$head"; return 1; }
+      open="$(git show "$base:openspec/changes/$change/tasks.md" 2>/dev/null | grep -Ec '^[[:space:]]*[-*][[:space:]]+\[[[:space:]]\]' || true)"
+      [ "${open:-0}" = 0 ] || { echo "archive PR but $base still has $open pending task(s) for '$change': the implementation is not merged"; return 1; }
+      files="$(git diff --no-renames --name-only "$base...$head" 2>/dev/null)" || { echo "cannot diff $base...$head"; return 1; }
       outside="$(printf '%s\n' "$files" | grep -v '^$' | grep -v '^openspec/' | head -n3 | paste -sd' ' -)"
       [ -z "$outside" ] || { echo "archive PR touches files outside openspec/ (e.g. $outside)"; return 1; };;
     *) echo "change '$change' is not in a recognizable state between $base and $head (not active on $head, or already archived on $base)"; return 1;;
