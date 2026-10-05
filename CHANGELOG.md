@@ -9,6 +9,10 @@ Notable changes to spec-devflow. The version lives in the `SKILL.md` frontmatter
 - Proposal gate: when the proposal comparison itself fails (unknown ref, no merge base) the check reports "cannot diff <base>...<head>" instead of claiming the proposal changed.
 - `tests/proposal-gate.sh`: the `merge.sh` dry-run test asserts the reason for the block, and new cases cover a deleted `tasks.md`, a base without `tasks.md` and an unknown base ref.
 
+### Known gaps
+- No test covers the guard that checks the head ref in the implementation check: removing it would not fail any test.
+- The two `git rev-parse --verify --quiet` calls in `pr_scope_check` do not silence stderr, so a ref that points to a non-commit object prints git's raw error before "cannot diff".
+
 ## 0.6.0
 
 ### Added
